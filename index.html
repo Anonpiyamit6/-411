@@ -1,0 +1,1605 @@
+<!doctype html>
+<html lang="th">
+ <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ระบบจองห้องเรียน 411</title>
+  <script src="/_sdk/element_sdk.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body {
+      box-sizing: border-box;
+    }
+    
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateX(-20px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+    
+    .fade-in {
+      animation: fadeIn 0.3s ease-out;
+    }
+    
+    .slide-in {
+      animation: slideIn 0.4s ease-out;
+    }
+    
+    .booking-card {
+      transition: all 0.3s ease;
+    }
+    
+    .booking-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
+    }
+    
+    .status-available {
+      background: linear-gradient(135deg, #d4f4dd 0%, #a8e6cf 100%);
+      border-left: 4px solid #4ade80;
+    }
+    
+    .status-booked {
+      background: linear-gradient(135deg, #ffd4d4 0%, #ffb3b3 100%);
+      border-left: 4px solid #ef4444;
+    }
+
+    .tab-button {
+      transition: all 0.3s ease;
+    }
+
+    .tab-button.active {
+      border-bottom: 3px solid;
+    }
+
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+
+    @media print {
+      body * {
+        visibility: hidden;
+      }
+      .print-area, .print-area * {
+        visibility: visible;
+      }
+      .print-area {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+      }
+    }
+  </style>
+  <style>@view-transition { navigation: auto; }</style>
+  <script src="/_sdk/data_sdk.js" type="text/javascript"></script>
+ </head>
+ <body class="w-full min-h-full">
+  <div id="app" class="w-full min-h-full"></div>
+  <script>
+    // Configuration
+    const defaultConfig = {
+      system_title: 'ระบบจองห้องเรียน 411',
+      login_title: 'เข้าสู่ระบบ',
+      teacher_dashboard_title: 'แดชบอร์ดครู',
+      admin_dashboard_title: 'แดชบอร์ดแอดมิน',
+      primary_color: '#a7c7e7',
+      secondary_color: '#ffffff',
+      text_color: '#1f2937',
+      action_color: '#60a5fa',
+      accent_color: '#f59e0b',
+      font_family: 'Kanit',
+      font_size: 16
+    };
+
+    // Default periods (will be overridden by data from database)
+    const DEFAULT_PERIODS = [
+      { name: 'คาบ 1', time: '08:00-09:00' },
+      { name: 'คาบ 2', time: '09:00-10:00' },
+      { name: 'คาบ 3', time: '10:00-11:00' },
+      { name: 'คาบ 4', time: '11:00-12:00' },
+      { name: 'คาบ 5', time: '13:00-14:00' },
+      { name: 'คาบ 6', time: '14:00-15:00' },
+      { name: 'คาบ 7', time: '15:00-16:00' },
+      { name: 'คาบ 8', time: '16:00-17:00' }
+    ];
+
+    // Admin credentials
+    const ADMIN_USERNAME = 'admin';
+    const ADMIN_PASSWORD = 'admin123';
+
+    // State
+    let currentUser = null;
+    let currentRole = null;
+    let allData = [];
+    let isLoading = false;
+    let currentAdminTab = 'bookings';
+
+    // Helper functions to separate data types
+    function getTeachers() {
+      return allData.filter(d => d.type === 'teacher');
+    }
+
+    function getBookings() {
+      return allData.filter(d => d.type === 'booking');
+    }
+
+    // [แก้ไขจุดที่ 1] getPeriods: บังคับแปลง ID เป็น String และรองรับ period_id
+    function getPeriods() {
+      const periods = allData.filter(d => d.type === 'period');
+      if (periods.length === 0) return DEFAULT_PERIODS.map((p, i) => ({ ...p, id: `default-${i}` }));
+      return periods.map(p => ({ 
+        id: String(p.period_id || p.id), // ใช้ period_id หรือ id เดิม และแปลงเป็น String
+        name: p.period_name, 
+        time: p.period_time 
+      }));
+    }
+
+    function getFormattedPeriod(period) {
+      return `${period.name} (${period.time})`;
+    }
+
+    // Google Apps Script Configuration
+    // [แก้ไขจุดที่ 2] ใส่ URL ใหม่ที่นี่
+    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby_FvjwL_N4OTK82vVB4w9Hwuelrr_kVssS4VSdpT85usjEQwtrhxO0bTLjBwrIXD21xA/exec';
+
+    // JSONP callback handlers
+    window.jsonpCallbacks = {};
+    let callbackCounter = 0;
+
+    // JSONP request function
+    function jsonpRequest(url, params = {}) {
+      return new Promise((resolve, reject) => {
+        const callbackName = `jsonpCallback${callbackCounter++}`;
+        const script = document.createElement('script');
+        
+        window.jsonpCallbacks[callbackName] = (data) => {
+          delete window.jsonpCallbacks[callbackName];
+          document.body.removeChild(script);
+          resolve(data);
+        };
+
+        const queryParams = new URLSearchParams({
+          ...params,
+          callback: `jsonpCallbacks.${callbackName}`
+        }).toString();
+
+        script.src = `${url}?${queryParams}`;
+        script.onerror = () => {
+          delete window.jsonpCallbacks[callbackName];
+          document.body.removeChild(script);
+          reject(new Error('JSONP request failed'));
+        };
+
+        document.body.appendChild(script);
+
+        // Timeout after 30 seconds
+        setTimeout(() => {
+          if (window.jsonpCallbacks[callbackName]) {
+            delete window.jsonpCallbacks[callbackName];
+            if (document.body.contains(script)) {
+              document.body.removeChild(script);
+            }
+            reject(new Error('JSONP request timeout'));
+          }
+        }, 30000);
+      });
+    }
+
+    // Google Sheets API functions
+    async function loadDataFromSheets() {
+      try {
+        const response = await jsonpRequest(APPS_SCRIPT_URL, {
+          action: 'getData'
+        });
+        
+        if (response.success) {
+          allData = response.data || [];
+          if (currentRole) {
+            renderDashboard();
+          }
+        } else {
+          console.error('Failed to load data:', response.error);
+          showToast('เกิดข้อผิดพลาดในการโหลดข้อมูล', 'error');
+        }
+      } catch (error) {
+        console.error('Error loading data:', error);
+        showToast('ไม่สามารถเชื่อมต่อกับ Google Sheets', 'error');
+      }
+    }
+
+    async function refreshData() {
+      if (isLoading) return;
+      const btn = document.getElementById('refreshBtn');
+      if(btn) {
+        btn.disabled = true;
+        btn.innerHTML = '🔄 กำลังโหลด...';
+      }
+      
+      showToast('กำลังดึงข้อมูลล่าสุด...', 'info'); // แจ้งเตือนสีฟ้า
+      await loadDataFromSheets();
+      showToast('ข้อมูลเป็นปัจจุบันแล้ว');
+      
+      if(btn) {
+        btn.disabled = false;
+        btn.innerHTML = '🔄 รีเฟรช';
+      }
+    }
+
+    async function saveDataToSheets(record) {
+      try {
+        const response = await jsonpRequest(APPS_SCRIPT_URL, {
+          action: 'createData',
+          data: JSON.stringify(record)
+        });
+        
+        if (response.success) {
+          await loadDataFromSheets();
+          return { isOk: true };
+        } else {
+          return { isOk: false, error: response.error };
+        }
+      } catch (error) {
+        console.error('Error saving data:', error);
+        return { isOk: false, error: error.message };
+      }
+    }
+
+    async function updateDataInSheets(record) {
+      try {
+        const response = await jsonpRequest(APPS_SCRIPT_URL, {
+          action: 'updateData',
+          data: JSON.stringify(record)
+        });
+        
+        if (response.success) {
+          await loadDataFromSheets();
+          return { isOk: true };
+        } else {
+          return { isOk: false, error: response.error };
+        }
+      } catch (error) {
+        console.error('Error updating data:', error);
+        return { isOk: false, error: error.message };
+      }
+    }
+
+    async function deleteDataFromSheets(record) {
+      try {
+        // [แก้ไขจุดที่ 3] ตรวจสอบ ID หลายแบบเพื่อรองรับทั้งเก่าและใหม่
+        let idToDelete = record.__backendId || record.period_id || record.teacher_id || record.booking_id || record.id;
+        
+        const response = await jsonpRequest(APPS_SCRIPT_URL, {
+          action: 'deleteData',
+          id: idToDelete
+        });
+        
+        if (response.success) {
+          await loadDataFromSheets();
+          return { isOk: true };
+        } else {
+          return { isOk: false, error: response.error };
+        }
+      } catch (error) {
+        console.error('Error deleting data:', error);
+        return { isOk: false, error: error.message };
+      }
+    }
+
+    // Initialize Data SDK (now using Google Sheets)
+    async function initializeDataSDK() {
+      await loadDataFromSheets();
+      
+      // Auto-refresh data every 30 seconds
+      setInterval(loadDataFromSheets, 30000);
+    }
+
+    // Toast notification
+    function showToast(message, type = 'success') {
+      const toast = document.createElement('div');
+      const bgColor = type === 'success' ? '#4ade80' : '#ef4444';
+      toast.className = 'fixed top-4 right-4 px-6 py-4 rounded-lg shadow-lg text-white fade-in z-50';
+      toast.style.background = bgColor;
+      toast.style.fontSize = `${window.elementSdk?.config?.font_size || defaultConfig.font_size}px`;
+      toast.style.fontFamily = `${window.elementSdk?.config?.font_family || defaultConfig.font_family}, sans-serif`;
+      toast.textContent = message;
+      document.body.appendChild(toast);
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        setTimeout(() => toast.remove(), 300);
+      }, 3000);
+    }
+
+    // Check for booking conflicts
+    function checkConflict(date, period, labName, excludeId = null) {
+      return getBookings().find(booking => 
+        booking.__backendId !== excludeId &&
+        booking.date === date &&
+        booking.period === period &&
+        booking.lab_name === labName
+      );
+    }
+
+    // Modal functions
+    function showModal(content) {
+      const modal = document.createElement('div');
+      modal.className = 'modal-overlay fade-in';
+      modal.innerHTML = content;
+      modal.onclick = (e) => {
+        if (e.target === modal) {
+          modal.remove();
+        }
+      };
+      document.body.appendChild(modal);
+      return modal;
+    }
+
+    function closeModal() {
+      const modal = document.querySelector('.modal-overlay');
+      if (modal) modal.remove();
+    }
+
+    // Period management functions
+    function showAddPeriodModal() {
+      const config = window.elementSdk?.config || defaultConfig;
+      const modal = showModal(`
+        <div class="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full mx-4 slide-in">
+          <h2 class="text-2xl font-bold mb-6" style="color: ${config.text_color}; font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 1.5}px;">เพิ่มคาบเรียนใหม่</h2>
+          
+          <form id="addPeriodForm" class="space-y-4">
+            <div>
+              <label class="block text-gray-700 mb-2 font-medium" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">ชื่อคาบ</label>
+              <input type="text" id="periodName" required placeholder="เช่น คาบ 1" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px; border-color: ${config.action_color};">
+            </div>
+            
+            <div>
+              <label class="block text-gray-700 mb-2 font-medium" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">เวลา</label>
+              <input type="text" id="periodTime" required placeholder="เช่น 08:00-09:00" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px; border-color: ${config.action_color};">
+            </div>
+            
+            <div class="flex gap-3 mt-6">
+              <button type="button" onclick="closeModal()" class="flex-1 py-3 px-6 rounded-lg font-semibold bg-gray-300 text-gray-700 hover:bg-gray-400 transition-all" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">
+                ยกเลิก
+              </button>
+              <button type="submit" class="flex-1 py-3 px-6 rounded-lg font-semibold text-white transition-all hover:shadow-lg" style="background: ${config.action_color}; font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">
+                เพิ่มคาบ
+              </button>
+            </div>
+          </form>
+        </div>
+      `);
+
+      document.getElementById('addPeriodForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        if (isLoading || allData.length >= 999) {
+          showToast('ไม่สามารถเพิ่มคาบได้ เนื่องจากถึงขีดจำกัดแล้ว', 'error');
+          return;
+        }
+
+        const name = document.getElementById('periodName').value;
+        const time = document.getElementById('periodTime').value;
+
+        isLoading = true;
+        const submitBtn = e.target.querySelector('button[type="submit"]');
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'กำลังเพิ่ม...';
+
+        const result = await saveDataToSheets({
+          type: 'period',
+          period_id: Date.now().toString(),
+          period_name: name,
+          period_time: time,
+          created_at: new Date().toISOString()
+        });
+
+        isLoading = false;
+
+        if (result.isOk) {
+          showToast('เพิ่มคาบเรียนสำเร็จ!');
+          closeModal();
+        } else {
+          showToast('เกิดข้อผิดพลาดในการเพิ่มคาบ', 'error');
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'เพิ่มคาบ';
+        }
+      });
+    }
+
+    // [แก้ไขจุดที่ 4] showEditPeriodModal: แก้การเปรียบเทียบ ID
+    function showEditPeriodModal(periodId) {
+      const config = window.elementSdk?.config || defaultConfig;
+      // แปลง ID เป็น String และเทียบทั้ง period_id และ id
+      const periodData = allData.find(d => d.type === 'period' && String(d.period_id || d.id) === String(periodId));
+      
+      if (!periodData) {
+        showToast('ไม่พบข้อมูลคาบเรียน', 'error');
+        return;
+      }
+      
+      const modal = showModal(`
+        <div class="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full mx-4 slide-in">
+          <h2 class="text-2xl font-bold mb-6" style="color: ${config.text_color}; font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 1.5}px;">แก้ไขคาบเรียน</h2>
+          
+          <form id="editPeriodForm" class="space-y-4">
+            <div>
+              <label class="block text-gray-700 mb-2 font-medium" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">ชื่อคาบ</label>
+              <input type="text" id="editPeriodName" value="${periodData.period_name}" required class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px; border-color: ${config.action_color};">
+            </div>
+            
+            <div>
+              <label class="block text-gray-700 mb-2 font-medium" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">เวลา</label>
+              <input type="text" id="editPeriodTime" value="${periodData.period_time}" required class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px; border-color: ${config.action_color};">
+            </div>
+            
+            <div class="flex gap-3 mt-6">
+              <button type="button" onclick="closeModal()" class="flex-1 py-3 px-6 rounded-lg font-semibold bg-gray-300 text-gray-700 hover:bg-gray-400 transition-all" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">
+                ยกเลิก
+              </button>
+              <button type="submit" class="flex-1 py-3 px-6 rounded-lg font-semibold text-white transition-all hover:shadow-lg" style="background: ${config.action_color}; font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">
+                บันทึก
+              </button>
+            </div>
+          </form>
+        </div>
+      `);
+
+      document.getElementById('editPeriodForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        if (isLoading) return;
+
+        const name = document.getElementById('editPeriodName').value;
+        const time = document.getElementById('editPeriodTime').value;
+
+        isLoading = true;
+        const submitBtn = e.target.querySelector('button[type="submit"]');
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'กำลังบันทึก...';
+
+        const updatedPeriod = {
+          ...periodData,
+          period_name: name,
+          period_time: time,
+          // บังคับส่ง period_id
+          period_id: periodData.period_id || periodData.id
+        };
+
+        const result = await updateDataInSheets(updatedPeriod);
+
+        isLoading = false;
+
+        if (result.isOk) {
+          showToast('แก้ไขคาบเรียนสำเร็จ!');
+          closeModal();
+        } else {
+          showToast('เกิดข้อผิดพลาดในการแก้ไข', 'error');
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'บันทึก';
+        }
+      });
+    }
+
+    // [แก้ไขจุดที่ 5] deletePeriod: แก้การเปรียบเทียบ ID
+    async function deletePeriod(periodId) {
+      const periodData = allData.find(d => d.type === 'period' && String(d.period_id || d.id) === String(periodId));
+      if (!periodData) {
+        showToast('ไม่พบข้อมูลคาบเรียน', 'error');
+        return;
+      }
+
+      const modal = showModal(`
+        <div class="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full mx-4 slide-in">
+          <h2 class="text-2xl font-bold mb-4 text-red-600" style="font-family: ${window.elementSdk?.config?.font_family || defaultConfig.font_family}, sans-serif;">⚠️ ยืนยันการลบ</h2>
+          <p class="mb-6" style="font-family: ${window.elementSdk?.config?.font_family || defaultConfig.font_family}, sans-serif; font-size: ${window.elementSdk?.config?.font_size || defaultConfig.font_size}px;">
+            คุณต้องการลบคาบ "${periodData.period_name} (${periodData.period_time})" ใช่หรือไม่?<br>
+            <span class="text-red-500 font-semibold">การกระทำนี้ไม่สามารถย้อนกลับได้</span>
+          </p>
+          <div class="flex gap-3">
+            <button onclick="closeModal()" class="flex-1 py-3 px-6 rounded-lg font-semibold bg-gray-300 text-gray-700 hover:bg-gray-400 transition-all" style="font-family: ${window.elementSdk?.config?.font_family || defaultConfig.font_family}, sans-serif; font-size: ${window.elementSdk?.config?.font_size || defaultConfig.font_size}px;">
+              ยกเลิก
+            </button>
+            <button onclick="confirmDeletePeriod('${periodId}')" class="flex-1 py-3 px-6 rounded-lg font-semibold bg-red-500 text-white hover:bg-red-600 transition-all" style="font-family: ${window.elementSdk?.config?.font_family || defaultConfig.font_family}, sans-serif; font-size: ${window.elementSdk?.config?.font_size || defaultConfig.font_size}px;">
+              ลบคาบ
+            </button>
+          </div>
+        </div>
+      `);
+    }
+
+    // [แก้ไขจุดที่ 6] confirmDeletePeriod: แก้การเปรียบเทียบ ID
+    async function confirmDeletePeriod(periodId) {
+      const periodData = allData.find(d => d.type === 'period' && String(d.period_id || d.id) === String(periodId));
+      if (!periodData || isLoading) return;
+
+      isLoading = true;
+      // แน่ใจว่ามี period_id
+      if(!periodData.period_id && periodData.id) periodData.period_id = periodData.id;
+
+      const result = await deleteDataFromSheets(periodData);
+      isLoading = false;
+
+      if (result.isOk) {
+        showToast('ลบคาบเรียนสำเร็จ!');
+        closeModal();
+      } else {
+        showToast('เกิดข้อผิดพลาดในการลบ', 'error');
+      }
+    }
+
+    // Teacher management functions
+    function showAddTeacherModal() {
+      const config = window.elementSdk?.config || defaultConfig;
+      const modal = showModal(`
+        <div class="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full mx-4 slide-in">
+          <h2 class="text-2xl font-bold mb-6" style="color: ${config.text_color}; font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 1.5}px;">เพิ่มครูใหม่</h2>
+          
+          <form id="addTeacherForm" class="space-y-4">
+            <div>
+              <label class="block text-gray-700 mb-2 font-medium" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">ชื่อครู</label>
+              <input type="text" id="teacherName" required class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px; border-color: ${config.action_color};">
+            </div>
+            
+            <div>
+              <label class="block text-gray-700 mb-2 font-medium" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">Username</label>
+              <input type="text" id="teacherUsername" required class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px; border-color: ${config.action_color};">
+            </div>
+            
+            <div>
+              <label class="block text-gray-700 mb-2 font-medium" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">Password</label>
+              <input type="password" id="teacherPassword" required class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px; border-color: ${config.action_color};">
+            </div>
+            
+            <div class="flex gap-3 mt-6">
+              <button type="button" onclick="closeModal()" class="flex-1 py-3 px-6 rounded-lg font-semibold bg-gray-300 text-gray-700 hover:bg-gray-400 transition-all" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">
+                ยกเลิก
+              </button>
+              <button type="submit" class="flex-1 py-3 px-6 rounded-lg font-semibold text-white transition-all hover:shadow-lg" style="background: ${config.action_color}; font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">
+                เพิ่มครู
+              </button>
+            </div>
+          </form>
+        </div>
+      `);
+
+      document.getElementById('addTeacherForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        if (isLoading || allData.length >= 999) {
+          showToast('ไม่สามารถเพิ่มครูได้ เนื่องจากถึงขีดจำกัดแล้ว', 'error');
+          return;
+        }
+
+        const name = document.getElementById('teacherName').value;
+        const username = document.getElementById('teacherUsername').value;
+        const password = document.getElementById('teacherPassword').value;
+
+        // Check if username already exists
+        const existingTeacher = getTeachers().find(t => t.teacher_username === username);
+        if (existingTeacher) {
+          showToast('Username นี้มีอยู่แล้ว', 'error');
+          return;
+        }
+
+        isLoading = true;
+        const submitBtn = e.target.querySelector('button[type="submit"]');
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'กำลังเพิ่ม...';
+
+        const result = await saveDataToSheets({
+          type: 'teacher',
+          teacher_id: Date.now().toString(),
+          teacher_name: name,
+          teacher_username: username,
+          teacher_password: password,
+          created_at: new Date().toISOString()
+        });
+
+        isLoading = false;
+
+        if (result.isOk) {
+          showToast('เพิ่มครูสำเร็จ!');
+          closeModal();
+        } else {
+          showToast('เกิดข้อผิดพลาดในการเพิ่มครู', 'error');
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'เพิ่มครู';
+        }
+      });
+    }
+
+    function showEditTeacherModal(teacher) {
+      const config = window.elementSdk?.config || defaultConfig;
+      const modal = showModal(`
+        <div class="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full mx-4 slide-in">
+          <h2 class="text-2xl font-bold mb-6" style="color: ${config.text_color}; font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 1.5}px;">แก้ไขข้อมูลครู</h2>
+          
+          <form id="editTeacherForm" class="space-y-4">
+            <div>
+              <label class="block text-gray-700 mb-2 font-medium" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">ชื่อครู</label>
+              <input type="text" id="editTeacherName" value="${teacher.teacher_name}" required class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px; border-color: ${config.action_color};">
+            </div>
+            
+            <div>
+              <label class="block text-gray-700 mb-2 font-medium" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">Username</label>
+              <input type="text" id="editTeacherUsername" value="${teacher.teacher_username}" required class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px; border-color: ${config.action_color};">
+            </div>
+            
+            <div>
+              <label class="block text-gray-700 mb-2 font-medium" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">Password ใหม่ (เว้นว่างหากไม่ต้องการเปลี่ยน)</label>
+              <input type="password" id="editTeacherPassword" placeholder="••••••••" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px; border-color: ${config.action_color};">
+            </div>
+            
+            <div class="flex gap-3 mt-6">
+              <button type="button" onclick="closeModal()" class="flex-1 py-3 px-6 rounded-lg font-semibold bg-gray-300 text-gray-700 hover:bg-gray-400 transition-all" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">
+                ยกเลิก
+              </button>
+              <button type="submit" class="flex-1 py-3 px-6 rounded-lg font-semibold text-white transition-all hover:shadow-lg" style="background: ${config.action_color}; font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">
+                บันทึก
+              </button>
+            </div>
+          </form>
+        </div>
+      `);
+
+      document.getElementById('editTeacherForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        if (isLoading) return;
+
+        const name = document.getElementById('editTeacherName').value;
+        const username = document.getElementById('editTeacherUsername').value;
+        const password = document.getElementById('editTeacherPassword').value;
+
+        // ตรวจสอบ Username ซ้ำ (ยกเว้นคนปัจจุบัน)
+        const existingTeacher = getTeachers().find(t => 
+          t.teacher_username === username && t.__backendId !== teacher.__backendId
+        );
+        if (existingTeacher) {
+          showToast('Username นี้มีอยู่แล้ว', 'error');
+          return;
+        }
+
+        isLoading = true;
+        const submitBtn = e.target.querySelector('button[type="submit"]');
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'กำลังบันทึก...';
+
+        const updatedTeacher = {
+          ...teacher,
+          teacher_name: name,
+          teacher_username: username,
+          // *** แก้ไขตรงนี้: บังคับส่ง teacher_id ไปด้วย (รองรับทั้งข้อมูลเก่าและใหม่) ***
+          teacher_id: teacher.teacher_id || teacher.id 
+        };
+
+        if (password) {
+          updatedTeacher.teacher_password = password;
+        }
+
+        const result = await updateDataInSheets(updatedTeacher);
+
+        isLoading = false;
+
+        if (result.isOk) {
+          showToast('แก้ไขข้อมูลครูสำเร็จ!');
+          closeModal();
+        } else {
+          showToast('เกิดข้อผิดพลาดในการแก้ไข: ' + (result.error || ''), 'error');
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'บันทึก';
+        }
+      });
+    }
+
+    async function deleteTeacher(teacher) {
+      const modal = showModal(`
+        <div class="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full mx-4 slide-in">
+          <h2 class="text-2xl font-bold mb-4 text-red-600" style="font-family: ${window.elementSdk?.config?.font_family || defaultConfig.font_family}, sans-serif;">⚠️ ยืนยันการลบ</h2>
+          <p class="mb-6" style="font-family: ${window.elementSdk?.config?.font_family || defaultConfig.font_family}, sans-serif; font-size: ${window.elementSdk?.config?.font_size || defaultConfig.font_size}px;">
+            คุณต้องการลบครู "${teacher.teacher_name}" ใช่หรือไม่?<br>
+            <span class="text-red-500 font-semibold">การกระทำนี้ไม่สามารถย้อนกลับได้</span>
+          </p>
+          <div class="flex gap-3">
+            <button onclick="closeModal()" class="flex-1 py-3 px-6 rounded-lg font-semibold bg-gray-300 text-gray-700 hover:bg-gray-400 transition-all" style="font-family: ${window.elementSdk?.config?.font_family || defaultConfig.font_family}, sans-serif; font-size: ${window.elementSdk?.config?.font_size || defaultConfig.font_size}px;">
+              ยกเลิก
+            </button>
+            <button onclick="confirmDeleteTeacher('${teacher.__backendId}')" class="flex-1 py-3 px-6 rounded-lg font-semibold bg-red-500 text-white hover:bg-red-600 transition-all" style="font-family: ${window.elementSdk?.config?.font_family || defaultConfig.font_family}, sans-serif; font-size: ${window.elementSdk?.config?.font_size || defaultConfig.font_size}px;">
+              ลบครู
+            </button>
+          </div>
+        </div>
+      `);
+    }
+
+    async function confirmDeleteTeacher(backendId) {
+      const teacher = getTeachers().find(t => t.__backendId === backendId);
+      if (!teacher || isLoading) return;
+
+      isLoading = true;
+      const result = await deleteDataFromSheets(teacher);
+      isLoading = false;
+
+      if (result.isOk) {
+        showToast('ลบครูสำเร็จ!');
+        closeModal();
+      } else {
+        showToast('เกิดข้อผิดพลาดในการลบ', 'error');
+      }
+    }
+
+    // Report generation
+    function generateReport(type = 'all') {
+      const config = window.elementSdk?.config || defaultConfig;
+      const bookings = getBookings();
+      
+      let reportContent = '';
+      
+      if (type === 'all') {
+        // Overall report
+        const bookingsByTeacher = {};
+        bookings.forEach(booking => {
+          if (!bookingsByTeacher[booking.teacher_name]) {
+            bookingsByTeacher[booking.teacher_name] = [];
+          }
+          bookingsByTeacher[booking.teacher_name].push(booking);
+        });
+
+        reportContent = `
+          <div class="print-area bg-white p-8">
+            <div class="text-center mb-8">
+              <h1 class="text-3xl font-bold mb-2" style="font-family: ${config.font_family}, sans-serif;">รายงานการจองห้องเรียน 411</h1>
+              <p class="text-gray-600" style="font-family: ${config.font_family}, sans-serif;">รายงานโดยรวมทั้งหมด</p>
+              <p class="text-gray-500 text-sm" style="font-family: ${config.font_family}, sans-serif;">วันที่สร้างรายงาน: ${new Date().toLocaleDateString('th-TH')}</p>
+            </div>
+
+            <div class="mb-6">
+              <h2 class="text-xl font-bold mb-4" style="font-family: ${config.font_family}, sans-serif;">สรุปภาพรวม</h2>
+              <div class="grid grid-cols-3 gap-4 mb-6">
+                <div class="border rounded-lg p-4">
+                  <p class="text-gray-600 text-sm" style="font-family: ${config.font_family}, sans-serif;">การจองทั้งหมด</p>
+                  <p class="text-3xl font-bold" style="color: ${config.action_color}; font-family: ${config.font_family}, sans-serif;">${bookings.length}</p>
+                </div>
+                <div class="border rounded-lg p-4">
+                  <p class="text-gray-600 text-sm" style="font-family: ${config.font_family}, sans-serif;">จำนวนครู</p>
+                  <p class="text-3xl font-bold" style="color: ${config.accent_color}; font-family: ${config.font_family}, sans-serif;">${Object.keys(bookingsByTeacher).length}</p>
+                </div>
+                <div class="border rounded-lg p-4">
+                  <p class="text-gray-600 text-sm" style="font-family: ${config.font_family}, sans-serif;">ห้องเรียน</p>
+                  <p class="text-3xl font-bold" style="color: #4ade80; font-family: ${config.font_family}, sans-serif;">411</p>
+                </div>
+              </div>
+            </div>
+
+            <div class="mb-6">
+              <h2 class="text-xl font-bold mb-4" style="font-family: ${config.font_family}, sans-serif;">รายละเอียดแยกตามครู</h2>
+              ${Object.keys(bookingsByTeacher).map(teacherName => `
+                <div class="mb-6 border-b pb-4">
+                  <h3 class="font-bold text-lg mb-3" style="color: ${config.action_color}; font-family: ${config.font_family}, sans-serif;">
+                    👨‍🏫 ${teacherName} (${bookingsByTeacher[teacherName].length} การจอง)
+                  </h3>
+                  <table class="w-full border-collapse">
+                    <thead>
+                      <tr class="bg-gray-100">
+                        <th class="border px-4 py-2 text-left" style="font-family: ${config.font_family}, sans-serif;">วันที่</th>
+                        <th class="border px-4 py-2 text-left" style="font-family: ${config.font_family}, sans-serif;">คาบเรียน</th>
+                        <th class="border px-4 py-2 text-left" style="font-family: ${config.font_family}, sans-serif;">การทดลอง</th>
+                        <th class="border px-4 py-2 text-left" style="font-family: ${config.font_family}, sans-serif;">ระดับชั้น</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${bookingsByTeacher[teacherName].map(booking => `
+                        <tr>
+                          <td class="border px-4 py-2" style="font-family: ${config.font_family}, sans-serif;">${booking.date}</td>
+                          <td class="border px-4 py-2" style="font-family: ${config.font_family}, sans-serif;">${booking.period}</td>
+                          <td class="border px-4 py-2" style="font-family: ${config.font_family}, sans-serif;">${booking.experiment_name}</td>
+                          <td class="border px-4 py-2" style="font-family: ${config.font_family}, sans-serif;">ม.${booking.grade}/${booking.room}</td>
+                        </tr>
+                      `).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        `;
+      } else {
+        // Individual teacher report
+        const teacherBookings = bookings.filter(b => b.teacher_name === type);
+        
+        reportContent = `
+          <div class="print-area bg-white p-8">
+            <div class="text-center mb-8">
+              <h1 class="text-3xl font-bold mb-2" style="font-family: ${config.font_family}, sans-serif;">รายงานการจองห้องเรียน 411</h1>
+              <p class="text-xl font-semibold" style="color: ${config.action_color}; font-family: ${config.font_family}, sans-serif;">👨‍🏫 ${type}</p>
+              <p class="text-gray-500 text-sm" style="font-family: ${config.font_family}, sans-serif;">วันที่สร้างรายงาน: ${new Date().toLocaleDateString('th-TH')}</p>
+            </div>
+
+            <div class="mb-6">
+              <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+                <p class="text-gray-600" style="font-family: ${config.font_family}, sans-serif;">การจองทั้งหมด</p>
+                <p class="text-4xl font-bold" style="color: ${config.action_color}; font-family: ${config.font_family}, sans-serif;">${teacherBookings.length} รายการ</p>
+              </div>
+            </div>
+
+            <div>
+              <h2 class="text-xl font-bold mb-4" style="font-family: ${config.font_family}, sans-serif;">รายละเอียดการจอง</h2>
+              <table class="w-full border-collapse">
+                <thead>
+                  <tr class="bg-gray-100">
+                    <th class="border px-4 py-2 text-left" style="font-family: ${config.font_family}, sans-serif;">ลำดับ</th>
+                    <th class="border px-4 py-2 text-left" style="font-family: ${config.font_family}, sans-serif;">วันที่</th>
+                    <th class="border px-4 py-2 text-left" style="font-family: ${config.font_family}, sans-serif;">คาบเรียน</th>
+                    <th class="border px-4 py-2 text-left" style="font-family: ${config.font_family}, sans-serif;">การทดลอง</th>
+                    <th class="border px-4 py-2 text-left" style="font-family: ${config.font_family}, sans-serif;">ระดับชั้น</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${teacherBookings.map((booking, index) => `
+                    <tr>
+                      <td class="border px-4 py-2" style="font-family: ${config.font_family}, sans-serif;">${index + 1}</td>
+                      <td class="border px-4 py-2" style="font-family: ${config.font_family}, sans-serif;">${booking.date}</td>
+                      <td class="border px-4 py-2" style="font-family: ${config.font_family}, sans-serif;">${booking.period}</td>
+                      <td class="border px-4 py-2" style="font-family: ${config.font_family}, sans-serif;">${booking.experiment_name}</td>
+                      <td class="border px-4 py-2" style="font-family: ${config.font_family}, sans-serif;">ม.${booking.grade}/${booking.room}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        `;
+      }
+
+      const modal = showModal(`
+        <div class="bg-white rounded-2xl shadow-2xl p-8 max-w-4xl w-full mx-4 max-h-screen overflow-y-auto slide-in">
+          <div class="flex justify-between items-center mb-6">
+            <h2 class="text-2xl font-bold" style="color: ${config.text_color}; font-family: ${config.font_family}, sans-serif;">📊 รายงานการจอง</h2>
+            <div class="flex gap-2">
+              <button onclick="window.print()" class="px-6 py-2 rounded-lg font-semibold text-white hover:shadow-lg transition-all" style="background: ${config.action_color}; font-family: ${config.font_family}, sans-serif;">
+                🖨️ พิมพ์รายงาน
+              </button>
+              <button onclick="closeModal()" class="px-6 py-2 rounded-lg font-semibold bg-gray-300 text-gray-700 hover:bg-gray-400 transition-all" style="font-family: ${config.font_family}, sans-serif;">
+                ปิด
+              </button>
+            </div>
+          </div>
+          ${reportContent}
+        </div>
+      `);
+    }
+
+    // Login page
+    function renderLogin() {
+      const config = window.elementSdk?.config || defaultConfig;
+      const app = document.getElementById('app');
+      app.innerHTML = `
+        <div class="w-full min-h-screen flex items-center justify-center p-4 relative" style="background: linear-gradient(135deg, ${config.primary_color} 0%, ${config.secondary_color} 100%);">
+          
+          <div class="w-full max-w-md bg-white rounded-2xl shadow-2xl p-8 fade-in z-10">
+            <div class="text-center mb-8">
+              <div class="w-28 h-28 mx-auto mb-4 flex items-center justify-center">
+                <img src="https://img5.pic.in.th/file/secure-sv1/fd6b0c3c8fcb90c46b0e373d31838c67.png" alt="Logo" class="w-full h-full object-contain drop-shadow-md">
+              </div>
+              <h1 class="text-3xl font-bold mb-2" style="color: ${config.text_color}; font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 1.875}px;">${config.system_title}</h1>
+              <p class="text-lg font-medium text-gray-700 mb-1" style="font-family: ${config.font_family}, sans-serif;">กลุ่มสาระการเรียนรู้วิทยาศาสตร์และเทคโนโลยี</p>
+              <p class="text-base text-gray-600 mb-6" style="font-family: ${config.font_family}, sans-serif;">โรงเรียนบางสะพานวิทยา จังหวัดประจวบคีรีขันธ์</p>
+              <p class="text-gray-400 text-sm" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">${config.login_title}</p>
+            </div>
+
+            <div class="space-y-4 mb-6">
+              <button onclick="showLoginForm('admin')" class="w-full py-4 px-6 rounded-xl font-semibold text-white transition-all hover:shadow-lg" style="background: ${config.action_color}; font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">
+                🔐 เข้าสู่ระบบแอดมิน
+              </button>
+              <button onclick="showLoginForm('teacher')" class="w-full py-4 px-6 rounded-xl font-semibold transition-all hover:shadow-lg" style="background: ${config.accent_color}; color: white; font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">
+                👨‍🏫 เข้าสู่ระบบครูผู้สอน
+              </button>
+            </div>
+          </div>
+
+          <div class="absolute bottom-6 w-full text-center">
+            <p class="text-gray-500 text-sm font-medium opacity-90" style="font-family: ${config.font_family}, sans-serif;">
+              พัฒนาระบบโดย ครูอานนท์ เมืองแก้ว
+            </p>
+          </div>
+        </div>
+      `;
+    }
+
+    // แก้ไขฟังก์ชัน Login ให้รองรับรหัสผ่านที่เป็นตัวเลข และตัดช่องว่าง
+    function showLoginForm(role) {
+      const config = window.elementSdk?.config || defaultConfig;
+      const app = document.getElementById('app');
+      const isAdmin = role === 'admin';
+      const teachers = getTeachers();
+      
+      app.innerHTML = `
+        <div class="w-full min-h-screen flex items-center justify-center p-4" style="background: linear-gradient(135deg, ${config.primary_color} 0%, ${config.secondary_color} 100%);">
+          <div class="w-full max-w-md bg-white rounded-2xl shadow-2xl p-8 fade-in">
+            <button onclick="renderLogin()" class="mb-4 text-gray-600 hover:text-gray-800 flex items-center" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 0.875}px;">
+              ← กลับ
+            </button>
+            
+            <div class="text-center mb-6">
+              <h2 class="text-2xl font-bold mb-2" style="color: ${config.text_color}; font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 1.5}px;">
+                ${isAdmin ? 'เข้าสู่ระบบแอดมิน' : 'เข้าสู่ระบบครูผู้สอน'}
+              </h2>
+            </div>
+
+            <form id="loginForm" class="space-y-4">
+              ${isAdmin ? `
+                <div>
+                  <label class="block text-gray-700 mb-2 font-medium" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">ชื่อผู้ใช้</label>
+                  <input type="text" id="username" required class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px; border-color: ${config.action_color};">
+                </div>
+                <div>
+                  <label class="block text-gray-700 mb-2 font-medium" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">รหัสผ่าน</label>
+                  <input type="password" id="password" required class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px; border-color: ${config.action_color};">
+                </div>
+              ` : `
+                <div>
+                  <label class="block text-gray-700 mb-2 font-medium" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">Username</label>
+                  <input type="text" id="teacherUsername" required class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px; border-color: ${config.action_color};">
+                </div>
+                <div>
+                  <label class="block text-gray-700 mb-2 font-medium" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">Password</label>
+                  <input type="password" id="teacherPassword" required class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px; border-color: ${config.action_color};">
+                </div>
+              `}
+              
+              <button type="submit" class="w-full py-3 px-6 rounded-lg font-semibold text-white transition-all hover:shadow-lg" style="background: ${config.action_color}; font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">
+                เข้าสู่ระบบ
+              </button>
+            </form>
+          </div>
+        </div>
+      `;
+
+      // Event Listener สำหรับ Login (โค้ดส่วนนี้เหมือนเดิม แต่ใส่มาให้ครบเพื่อความชัวร์ครับ)
+      document.getElementById('loginForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        
+        if (isAdmin) {
+          const username = document.getElementById('username').value;
+          const password = document.getElementById('password').value;
+          
+          if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
+            currentUser = 'Admin';
+            currentRole = 'admin';
+            renderDashboard();
+            showToast('เข้าสู่ระบบสำเร็จ!');
+          } else {
+            showToast('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง', 'error');
+          }
+        } else {
+          const u = document.getElementById('teacherUsername').value;
+          const p = document.getElementById('teacherPassword').value;
+          
+          // ระบบตรวจสอบรหัสผ่าน (ที่แก้ไปรอบที่แล้ว)
+          const teacher = teachers.find(t => 
+            String(t.teacher_username).trim() === String(u).trim() && 
+            String(t.teacher_password).trim() === String(p).trim()
+          );
+          
+          if (teacher) {
+            currentUser = teacher.teacher_name;
+            currentRole = 'teacher';
+            renderDashboard();
+            showToast(`ยินดีต้อนรับ ${teacher.teacher_name}!`);
+          } else {
+            showToast('Username หรือ Password ไม่ถูกต้อง', 'error');
+          }
+        }
+      });
+    }
+
+    // Teacher Dashboard
+    function renderTeacherDashboard() {
+      const config = window.elementSdk?.config || defaultConfig;
+      const app = document.getElementById('app');
+      const bookings = getBookings();
+      const myBookings = bookings.filter(b => b.teacher_name === currentUser);
+      const periods = getPeriods();
+      
+      const today = new Date();
+      const monthDates = Array.from({length: 30}, (_, i) => { 
+        const d = new Date(today); 
+        d.setDate(today.getDate() + i); 
+        return d.toISOString().split('T')[0]; 
+      });
+
+      let scheduleGrid = '<div class="overflow-x-auto border rounded-lg"><table class="border-collapse" style="min-width: 2400px;"><thead><tr class="bg-gray-100"><th class="border px-3 py-3 text-left sticky left-0 bg-gray-100 z-10" style="font-family: ' + config.font_family + ', sans-serif; font-size: ' + (config.font_size * 0.875) + 'px; min-width: 120px;">คาบ/วัน</th>';
+      
+      monthDates.forEach(date => {
+        const d = new Date(date);
+        const dayNames = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
+        const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+        scheduleGrid += `<th class="border px-2 py-3 text-center" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 0.75}px; min-width: 80px; ${isWeekend ? 'background: #fee;' : ''}">${dayNames[d.getDay()]}<br><span class="text-xs">${d.getDate()}/${d.getMonth() + 1}</span></th>`;
+      });
+      scheduleGrid += '</tr></thead><tbody>';
+
+      periods.forEach(period => {
+        const periodStr = getFormattedPeriod(period);
+        scheduleGrid += `<tr><td class="border px-3 py-2 font-semibold bg-gray-50 sticky left-0 z-10" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 0.7}px; min-width: 120px;">${periodStr}</td>`;
+        
+        monthDates.forEach(date => {
+          const booking = bookings.find(b => b.date === date && b.period === periodStr);
+          const d = new Date(date);
+          const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+          
+          if (booking) {
+            const isMine = booking.teacher_name === currentUser;
+            scheduleGrid += `<td class="border px-1 py-2 text-xs" style="background: ${isMine ? '#bfdbfe' : '#fecaca'}; font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 0.65}px; min-width: 80px;"><div class="font-semibold truncate" title="${booking.teacher_name}">${booking.teacher_name.substring(0, 10)}</div><div class="text-xs truncate" title="${booking.experiment_name || ''}">${(booking.experiment_name || 'ไม่ระบุ').substring(0, 12)}</div><div class="text-xs">ม.${booking.grade || '-'}/${booking.room || '-'}</div></td>`;
+          } else {
+            scheduleGrid += `<td class="border px-1 py-2 text-center text-gray-400" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 0.65}px; min-width: 80px; ${isWeekend ? 'background: #fee;' : ''}">ว่าง</td>`;
+          }
+        });
+        scheduleGrid += '</tr>';
+      });
+      scheduleGrid += '</tbody></table></div>';
+      
+      app.innerHTML = `
+        <div class="w-full min-h-screen flex flex-col" style="background: ${config.secondary_color};">
+          <div class="w-full px-4 py-6 shadow-md" style="background: linear-gradient(135deg, ${config.primary_color} 0%, ${config.action_color} 100%);">
+            <div class="max-w-7xl mx-auto flex justify-between items-center">
+              <div>
+                <h1 class="text-2xl font-bold text-white mb-1" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 1.5}px;">${config.teacher_dashboard_title}</h1>
+                <p class="text-white" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 0.875}px;">👋 สวัสดี ${currentUser}</p>
+              </div>
+              <div class="flex gap-2">
+                <button id="refreshBtn" onclick="refreshData()" class="px-4 py-2 bg-white/20 text-white rounded-lg font-semibold hover:bg-white/30 transition-all border border-white/40 backdrop-blur-sm" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 0.875}px;">
+                  🔄 รีเฟรช
+                </button>
+                <button onclick="logout()" class="px-6 py-2 bg-white rounded-lg font-semibold hover:shadow-lg transition-all" style="color: ${config.action_color}; font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 0.875}px;">
+                  ออกจากระบบ
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="max-w-7xl mx-auto p-4 flex-grow w-full">
+            <div class="bg-white rounded-2xl shadow-lg p-6 mb-6 slide-in">
+              <h2 class="text-xl font-bold mb-4" style="color: ${config.text_color}; font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 1.25}px;">📊 ตารางการใช้ห้อง 411 (30 วันข้างหน้า)</h2>
+              <div class="mb-3 flex gap-4 flex-wrap">
+                <div class="flex items-center gap-2"><div class="w-4 h-4 rounded" style="background: #bfdbfe;"></div><span style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 0.875}px;">การจองของฉัน</span></div>
+                <div class="flex items-center gap-2"><div class="w-4 h-4 rounded" style="background: #fecaca;"></div><span style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 0.875}px;">ครูท่านอื่น</span></div>
+                <div class="flex items-center gap-2"><div class="w-4 h-4 rounded" style="background: #fee;"></div><span style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 0.875}px;">วันหยุด</span></div>
+              </div>
+              <div class="mb-2 text-sm text-gray-600" style="font-family: ${config.font_family}, sans-serif;">💡 เลื่อนตารางไปทางขวาเพื่อดูวันถัดไป</div>
+              ${scheduleGrid}
+            </div>
+
+            <div class="bg-white rounded-2xl shadow-lg p-6 mb-6 slide-in">
+              <h2 class="text-xl font-bold mb-4" style="color: ${config.text_color}; font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 1.25}px;">📝 จองห้องเรียนใหม่</h2>
+              <form id="bookingForm" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div><label class="block text-gray-700 mb-2 font-medium" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">วันที่</label><input type="date" id="bookingDate" required class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px; border-color: ${config.action_color};"></div>
+                <div><label class="block text-gray-700 mb-2 font-medium" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">คาบเรียน</label><select id="bookingPeriod" required class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px; border-color: ${config.action_color};"><option value="">-- เลือกคาบเรียน --</option>${getPeriods().map(p => `<option value="${getFormattedPeriod(p)}">${getFormattedPeriod(p)}</option>`).join('')}</select></div>
+                <div><label class="block text-gray-700 mb-2 font-medium" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">ชื่อการทดลอง/กิจกรรม</label><input type="text" id="experimentName" required placeholder="เช่น การทดลองเรื่องแรง" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px; border-color: ${config.action_color};"></div>
+                <div><label class="block text-gray-700 mb-2 font-medium" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">ระดับชั้น</label><select id="bookingGrade" required class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px; border-color: ${config.action_color};"><option value="">-- เลือกระดับชั้น --</option><option value="1">ม.1</option><option value="2">ม.2</option><option value="3">ม.3</option><option value="4">ม.4</option><option value="5">ม.5</option><option value="6">ม.6</option></select></div>
+                <div><label class="block text-gray-700 mb-2 font-medium" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">ห้อง</label><input type="text" id="bookingRoom" required placeholder="เช่น 1, 2, 3" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px; border-color: ${config.action_color};"></div>
+                <div class="flex items-end"><button type="submit" class="w-full py-3 px-6 rounded-lg font-semibold text-white transition-all hover:shadow-lg" style="background: ${config.action_color}; font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">จองห้อง</button></div>
+              </form>
+            </div>
+
+            <div class="bg-white rounded-2xl shadow-lg p-6 slide-in">
+              <h2 class="text-xl font-bold mb-4" style="color: ${config.text_color}; font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 1.25}px;">📅 การจองของฉัน (${myBookings.length} รายการ)</h2>
+              <div id="myBookingsList" class="space-y-3">
+                ${myBookings.length === 0 ? `<p class="text-gray-500 text-center py-8" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">ยังไม่มีการจอง</p>` : myBookings.map(booking => `
+                  <div class="booking-card p-4 rounded-lg flex justify-between items-center status-booked">
+                    <div style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">
+                      <div class="font-semibold" style="color: ${config.text_color};">🔬 ${booking.experiment_name || 'ไม่ระบุ'}</div>
+                      <div class="text-sm" style="color: ${config.text_color};">📅 ${booking.date} | ⏰ ${booking.period} | 🎓 ม.${booking.grade || '-'}/${booking.room || '-'}</div>
+                    </div>
+                    <button onclick="deleteBooking('${booking.__backendId}')" class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 0.875}px;">ยกเลิก</button>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          </div>
+
+          <div class="w-full text-center py-6 mt-auto"><p class="text-gray-500 text-sm font-medium" style="font-family: ${config.font_family}, sans-serif;">พัฒนาระบบโดย ครูอานนท์ เมืองแก้ว</p></div>
+        </div>
+      `;
+
+      const dateInput = document.getElementById('bookingDate');
+      dateInput.min = new Date().toISOString().split('T')[0];
+
+      document.getElementById('bookingForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (isLoading || allData.length >= 999) { showToast('ไม่สามารถเพิ่มการจองได้ เนื่องจากถึงขีดจำกัดแล้ว', 'error'); return; }
+        const date = document.getElementById('bookingDate').value;
+        const period = document.getElementById('bookingPeriod').value;
+        const experimentName = document.getElementById('experimentName').value;
+        const grade = document.getElementById('bookingGrade').value;
+        const room = document.getElementById('bookingRoom').value;
+        const conflict = checkConflict(date, period, 'ห้องเรียน 411');
+        if (conflict) { showToast(`❌ คาบนี้ถูกจองแล้วโดย ${conflict.teacher_name}`, 'error'); return; }
+        isLoading = true;
+        const submitBtn = e.target.querySelector('button[type="submit"]');
+        submitBtn.disabled = true; submitBtn.textContent = 'กำลังจอง...';
+        const result = await saveDataToSheets({ type: 'booking', booking_id: Date.now().toString(), teacher_name: currentUser, date, period, lab_name: 'ห้องเรียน 411', experiment_name: experimentName, grade, room, created_at: new Date().toISOString() });
+        isLoading = false; submitBtn.disabled = false; submitBtn.textContent = 'จองห้อง';
+        if (result.isOk) { showToast('✅ จองห้องสำเร็จ!'); e.target.reset(); } else { showToast('เกิดข้อผิดพลาดในการจอง', 'error'); }
+      });
+    }
+
+    // Admin Dashboard
+    function renderAdminDashboard() {
+      const config = window.elementSdk?.config || defaultConfig;
+      const app = document.getElementById('app');
+      const bookings = getBookings();
+      const teachers = getTeachers();
+      
+      app.innerHTML = `
+        <div class="w-full min-h-screen flex flex-col" style="background: ${config.secondary_color};">
+          <div class="w-full px-4 py-6 shadow-md" style="background: linear-gradient(135deg, ${config.primary_color} 0%, ${config.action_color} 100%);">
+            <div class="max-w-7xl mx-auto flex justify-between items-center">
+              <div>
+                <h1 class="text-2xl font-bold text-white mb-1" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 1.5}px;">${config.admin_dashboard_title}</h1>
+                <p class="text-white" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 0.875}px;">🔐 สวัสดี ${currentUser}</p>
+              </div>
+              <div class="flex gap-2">
+                <button id="refreshBtn" onclick="refreshData()" class="px-4 py-2 bg-white/20 text-white rounded-lg font-semibold hover:bg-white/30 transition-all border border-white/40 backdrop-blur-sm" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 0.875}px;">
+                  🔄 รีเฟรช
+                </button>
+                <button onclick="logout()" class="px-6 py-2 bg-white rounded-lg font-semibold hover:shadow-lg transition-all" style="color: ${config.action_color}; font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 0.875}px;">
+                  ออกจากระบบ
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="max-w-7xl mx-auto p-4 flex-grow w-full">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+              <div class="bg-white rounded-xl shadow-lg p-6 slide-in">
+                <div class="flex items-center justify-between">
+                  <div><p class="text-gray-600 mb-1" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 0.875}px;">การจองทั้งหมด</p><p class="text-3xl font-bold" style="color: ${config.action_color}; font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 1.875}px;">${bookings.length}</p></div>
+                  <div class="w-12 h-12 rounded-full flex items-center justify-center" style="background: ${config.action_color};"><span class="text-2xl">📊</span></div>
+                </div>
+              </div>
+              <div class="bg-white rounded-xl shadow-lg p-6 slide-in">
+                <div class="flex items-center justify-between">
+                  <div><p class="text-gray-600 mb-1" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 0.875}px;">ครูทั้งหมด</p><p class="text-3xl font-bold" style="color: ${config.accent_color}; font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 1.875}px;">${teachers.length}</p></div>
+                  <div class="w-12 h-12 rounded-full flex items-center justify-center" style="background: ${config.accent_color};"><span class="text-2xl">👨‍🏫</span></div>
+                </div>
+              </div>
+              <div class="bg-white rounded-xl shadow-lg p-6 slide-in">
+                <div class="flex items-center justify-between">
+                  <div><p class="text-gray-600 mb-1" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 0.875}px;">ห้องเรียน</p><p class="text-3xl font-bold" style="color: #4ade80; font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 1.875}px;">411</p></div>
+                  <div class="w-12 h-12 rounded-full flex items-center justify-center" style="background: #4ade80;"><span class="text-2xl">🏫</span></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="bg-white rounded-2xl shadow-lg mb-6">
+              <div class="flex border-b overflow-x-auto">
+                <button onclick="switchAdminTab('bookings')" class="tab-button px-6 py-4 font-semibold transition-all ${currentAdminTab === 'bookings' ? 'active' : ''}" style="color: ${currentAdminTab === 'bookings' ? config.action_color : config.text_color}; border-color: ${config.action_color}; font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">📅 การจอง</button>
+                <button onclick="switchAdminTab('schedule')" class="tab-button px-6 py-4 font-semibold transition-all ${currentAdminTab === 'schedule' ? 'active' : ''}" style="color: ${currentAdminTab === 'schedule' ? config.action_color : config.text_color}; border-color: ${config.action_color}; font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">📊 ตารางเรียน</button>
+                <button onclick="switchAdminTab('periods')" class="tab-button px-6 py-4 font-semibold transition-all ${currentAdminTab === 'periods' ? 'active' : ''}" style="color: ${currentAdminTab === 'periods' ? config.action_color : config.text_color}; border-color: ${config.action_color}; font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">⏰ จัดการคาบเรียน</button>
+                <button onclick="switchAdminTab('teachers')" class="tab-button px-6 py-4 font-semibold transition-all ${currentAdminTab === 'teachers' ? 'active' : ''}" style="color: ${currentAdminTab === 'teachers' ? config.action_color : config.text_color}; border-color: ${config.action_color}; font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">👨‍🏫 จัดการครู</button>
+                <button onclick="switchAdminTab('reports')" class="tab-button px-6 py-4 font-semibold transition-all ${currentAdminTab === 'reports' ? 'active' : ''}" style="color: ${currentAdminTab === 'reports' ? config.action_color : config.text_color}; border-color: ${config.action_color}; font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">📊 รายงาน</button>
+              </div>
+              <div id="tabContent" class="p-6">${renderAdminTabContent()}</div>
+            </div>
+          </div>
+
+          <div class="w-full text-center py-6 mt-auto"><p class="text-gray-500 text-sm font-medium" style="font-family: ${config.font_family}, sans-serif;">พัฒนาระบบโดย ครูอานนท์ เมืองแก้ว</p></div>
+        </div>
+      `;
+    }
+
+    function renderAdminTabContent() {
+      const config = window.elementSdk?.config || defaultConfig;
+      const bookings = getBookings();
+      const teachers = getTeachers();
+      const periods = getPeriods();
+
+      if (currentAdminTab === 'schedule') {
+        // --- Logic สร้างตารางเรียน (ย้ายมาจากหน้าหลัก) ---
+        const today = new Date();
+        const monthDates = [];
+        for (let i = 0; i < 30; i++) {
+          const date = new Date(today);
+          date.setDate(today.getDate() + i);
+          monthDates.push(date.toISOString().split('T')[0]);
+        }
+
+        let scheduleGrid = '<div class="overflow-x-auto border rounded-lg"><table class="border-collapse" style="min-width: 2400px;"><thead><tr class="bg-gray-100"><th class="border px-3 py-3 text-left sticky left-0 bg-gray-100 z-10" style="font-family: ' + config.font_family + ', sans-serif; font-size: ' + (config.font_size * 0.875) + 'px; min-width: 120px;">คาบ/วัน</th>';
+        
+        monthDates.forEach(date => {
+          const d = new Date(date);
+          const dayNames = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
+          const dayName = dayNames[d.getDay()];
+          const displayDate = d.getDate() + '/' + (d.getMonth() + 1);
+          const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+          scheduleGrid += '<th class="border px-2 py-3 text-center" style="font-family: ' + config.font_family + ', sans-serif; font-size: ' + (config.font_size * 0.75) + 'px; min-width: 80px; ' + (isWeekend ? 'background: #fee;' : '') + '">' + dayName + '<br><span class="text-xs">' + displayDate + '</span></th>';
+        });
+        scheduleGrid += '</tr></thead><tbody>';
+
+        periods.forEach(period => {
+          const periodStr = getFormattedPeriod(period);
+          scheduleGrid += '<tr><td class="border px-3 py-2 font-semibold bg-gray-50 sticky left-0 z-10" style="font-family: ' + config.font_family + ', sans-serif; font-size: ' + (config.font_size * 0.7) + 'px; min-width: 120px;">' + periodStr + '</td>';
+          
+          monthDates.forEach(date => {
+            const booking = bookings.find(b => b.date === date && b.period === periodStr);
+            const d = new Date(date);
+            const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+            
+            if (booking) {
+              scheduleGrid += '<td class="border px-1 py-2 text-xs" style="background: #fecaca; font-family: ' + config.font_family + ', sans-serif; font-size: ' + (config.font_size * 0.65) + 'px; min-width: 80px;"><div class="font-semibold truncate" title="' + booking.teacher_name + '">' + booking.teacher_name.substring(0, 10) + '</div><div class="text-xs truncate" title="' + (booking.experiment_name || 'ไม่ระบุ') + '">' + (booking.experiment_name || 'ไม่ระบุ').substring(0, 12) + '</div><div class="text-xs">ม.' + (booking.grade || '-') + '/' + (booking.room || '-') + '</div></td>';
+            } else {
+              scheduleGrid += '<td class="border px-1 py-2 text-center text-gray-400" style="font-family: ' + config.font_family + ', sans-serif; font-size: ' + (config.font_size * 0.65) + 'px; min-width: 80px; ' + (isWeekend ? 'background: #fee;' : '') + '">ว่าง</td>';
+            }
+          });
+          scheduleGrid += '</tr>';
+        });
+        scheduleGrid += '</tbody></table></div>';
+
+        return `
+          <div class="mb-4">
+            <h3 class="text-lg font-bold mb-4" style="color: ${config.text_color}; font-family: ${config.font_family}, sans-serif;">ตารางการใช้ห้อง 411 (30 วันข้างหน้า)</h3>
+            <div class="mb-3 flex gap-4 flex-wrap">
+                <div class="flex items-center gap-2">
+                  <div class="w-4 h-4 rounded" style="background: #fecaca;"></div>
+                  <span style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 0.875}px;">มีการจองแล้ว</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <div class="w-4 h-4 rounded" style="background: #fee;"></div>
+                  <span style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 0.875}px;">วันหยุด</span>
+                </div>
+            </div>
+            <div class="mb-2 text-sm text-gray-600" style="font-family: ${config.font_family}, sans-serif;">
+                💡 เลื่อนตารางไปทางขวาเพื่อดูวันถัดไป
+            </div>
+            ${scheduleGrid}
+          </div>
+        `;
+      } else if (currentAdminTab === 'periods') {
+        // (ส่วนเดิมของ Periods - ไม่เปลี่ยนแปลง)
+        return `
+          <div class="mb-4">
+            <button onclick="showAddPeriodModal()" class="px-6 py-3 rounded-lg font-semibold text-white transition-all hover:shadow-lg" style="background: ${config.action_color}; font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">
+              ➕ เพิ่มคาบเรียนใหม่
+            </button>
+          </div>
+
+          <div class="space-y-3">
+            ${periods.length === 0 ? `
+              <p class="text-gray-500 text-center py-8" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">ยังไม่มีคาบเรียนในระบบ</p>
+            ` : periods.map((period, index) => {
+              const isDefault = period.id.startsWith('default-');
+              return `
+                <div class="booking-card p-4 rounded-lg border-l-4" style="background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); border-color: ${config.accent_color};">
+                  <div class="flex justify-between items-center">
+                    <div style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">
+                      <div class="font-semibold text-lg" style="color: ${config.text_color};">
+                        ⏰ ${period.name}
+                        ${isDefault ? '<span class="text-xs bg-gray-200 px-2 py-1 rounded ml-2">ค่าเริ่มต้น</span>' : ''}
+                      </div>
+                      <div class="text-sm" style="color: ${config.text_color};">
+                        🕐 ${period.time}
+                      </div>
+                    </div>
+                    ${!isDefault ? `
+                      <div class="flex gap-2">
+                        <button onclick="showEditPeriodModal('${period.id}')" class="px-4 py-2 rounded-lg font-semibold text-white hover:shadow-lg transition-all" style="background: ${config.action_color}; font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 0.875}px;">
+                          แก้ไข
+                        </button>
+                        <button onclick="deletePeriod('${period.id}')" class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 0.875}px;">
+                          ลบ
+                        </button>
+                      </div>
+                    ` : `
+                      <div class="text-gray-500 text-sm" style="font-family: ${config.font_family}, sans-serif;">
+                        คาบเริ่มต้น (เพิ่มคาบใหม่เพื่อแทนที่)
+                      </div>
+                    `}
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        `;
+      } else if (currentAdminTab === 'bookings') {
+        // (ส่วนเดิมของ Bookings - ไม่เปลี่ยนแปลง)
+        return `
+          <div class="mb-4">
+            <input type="text" id="searchInput" placeholder="🔍 ค้นหาตามชื่อครู วันที่ หรือการทดลอง..." class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px; border-color: ${config.action_color};">
+          </div>
+
+          <div id="allBookingsList" class="space-y-3">
+            ${bookings.length === 0 ? `
+              <p class="text-gray-500 text-center py-8" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">ยังไม่มีการจอง</p>
+            ` : bookings.map(booking => `
+              <div class="booking-card p-4 rounded-lg flex justify-between items-center status-booked">
+                <div style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">
+                  <div class="font-semibold" style="color: ${config.text_color};">👨‍🏫 ${booking.teacher_name}</div>
+                  <div class="text-sm" style="color: ${config.text_color};">🔬 ${booking.experiment_name || 'ไม่ระบุ'} | 📅 ${booking.date} | ⏰ ${booking.period} | 🎓 ม.${booking.grade || '-'}/${booking.room || '-'}</div>
+                </div>
+                <button onclick="deleteBooking('${booking.__backendId}')" class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 0.875}px;">
+                  ลบ
+                </button>
+              </div>
+            `).join('')}
+          </div>
+        `;
+      } else if (currentAdminTab === 'teachers') {
+        // (ส่วนเดิมของ Teachers - ไม่เปลี่ยนแปลง)
+        return `
+          <div class="mb-4">
+            <button onclick="showAddTeacherModal()" class="px-6 py-3 rounded-lg font-semibold text-white transition-all hover:shadow-lg" style="background: ${config.action_color}; font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">
+              ➕ เพิ่มครูใหม่
+            </button>
+          </div>
+
+          <div class="space-y-3">
+            ${teachers.length === 0 ? `
+              <p class="text-gray-500 text-center py-8" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">ยังไม่มีครูในระบบ</p>
+            ` : teachers.map(teacher => {
+              const teacherBookings = bookings.filter(b => b.teacher_name === teacher.teacher_name);
+              return `
+                <div class="booking-card p-4 rounded-lg border-l-4" style="background: linear-gradient(135deg, #e0f2fe 0%, #bae6fd 100%); border-color: ${config.action_color};">
+                  <div class="flex justify-between items-center">
+                    <div style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">
+                      <div class="font-semibold text-lg" style="color: ${config.text_color};">👨‍🏫 ${teacher.teacher_name}</div>
+                      <div class="text-sm" style="color: ${config.text_color};">
+                        👤 Username: ${teacher.teacher_username} | 📊 การจอง: ${teacherBookings.length} รายการ
+                      </div>
+                    </div>
+                    <div class="flex gap-2">
+                      <button onclick='showEditTeacherModal(${JSON.stringify(teacher)})' class="px-4 py-2 rounded-lg font-semibold text-white hover:shadow-lg transition-all" style="background: ${config.accent_color}; font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 0.875}px;">
+                        แก้ไข
+                      </button>
+                      <button onclick='deleteTeacher(${JSON.stringify(teacher)})' class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 0.875}px;">
+                        ลบ
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        `;
+      } else if (currentAdminTab === 'reports') {
+        // (ส่วนเดิมของ Reports - ไม่เปลี่ยนแปลง)
+        const bookingsByTeacher = {};
+        bookings.forEach(booking => {
+          if (!bookingsByTeacher[booking.teacher_name]) {
+            bookingsByTeacher[booking.teacher_name] = [];
+          }
+          bookingsByTeacher[booking.teacher_name].push(booking);
+        });
+
+        return `
+          <div class="mb-6">
+            <button onclick="generateReport('all')" class="px-6 py-3 rounded-lg font-semibold text-white transition-all hover:shadow-lg" style="background: ${config.action_color}; font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">
+              📊 สร้างรายงานโดยรวม
+            </button>
+          </div>
+
+          <h3 class="text-lg font-bold mb-4" style="color: ${config.text_color}; font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 1.125}px;">รายงานแยกตามครู</h3>
+          
+          <div class="space-y-3">
+            ${Object.keys(bookingsByTeacher).length === 0 ? `
+              <p class="text-gray-500 text-center py-8" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">ยังไม่มีข้อมูลการจอง</p>
+            ` : Object.keys(bookingsByTeacher).map(teacherName => `
+              <div class="booking-card p-4 rounded-lg border-l-4" style="background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); border-color: ${config.accent_color};">
+                <div class="flex justify-between items-center">
+                  <div style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">
+                    <div class="font-semibold text-lg" style="color: ${config.text_color};">👨‍🏫 ${teacherName}</div>
+                    <div class="text-sm" style="color: ${config.text_color};">
+                      📊 การจองทั้งหมด: ${bookingsByTeacher[teacherName].length} รายการ
+                    </div>
+                  </div>
+                  <button onclick="generateReport('${teacherName}')" class="px-6 py-2 rounded-lg font-semibold text-white hover:shadow-lg transition-all" style="background: ${config.action_color}; font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 0.875}px;">
+                    📄 ดูรายงาน
+                  </button>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        `;
+      }
+    }
+
+    function switchAdminTab(tab) {
+      currentAdminTab = tab;
+      renderDashboard();
+      
+      // Setup search if on bookings tab
+      if (tab === 'bookings') {
+        setTimeout(() => {
+          const searchInput = document.getElementById('searchInput');
+          if (searchInput) {
+            searchInput.addEventListener('input', (e) => {
+              const searchTerm = e.target.value.toLowerCase();
+              const filtered = getBookings().filter(booking => 
+                booking.teacher_name.toLowerCase().includes(searchTerm) ||
+                booking.date.includes(searchTerm) ||
+                (booking.experiment_name && booking.experiment_name.toLowerCase().includes(searchTerm))
+              );
+              
+              const config = window.elementSdk?.config || defaultConfig;
+              const listEl = document.getElementById('allBookingsList');
+              listEl.innerHTML = filtered.length === 0 ? `
+                <p class="text-gray-500 text-center py-8" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">ไม่พบข้อมูล</p>
+              ` : filtered.map(booking => `
+                <div class="booking-card p-4 rounded-lg flex justify-between items-center status-booked">
+                  <div style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">
+                    <div class="font-semibold" style="color: ${config.text_color};">👨‍🏫 ${booking.teacher_name}</div>
+                    <div class="text-sm" style="color: ${config.text_color};">🔬 ${booking.experiment_name || 'ไม่ระบุ'} | 📅 ${booking.date} | ⏰ ${booking.period} | 🎓 ม.${booking.grade || '-'}/${booking.room || '-'}</div>
+                  </div>
+                  <button onclick="deleteBooking('${booking.__backendId}')" class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 0.875}px;">
+                    ลบ
+                  </button>
+                </div>
+              `).join('');
+            });
+          }
+        }, 100);
+      }
+    }
+
+    // Render dashboard based on role
+    function renderDashboard() {
+      if (currentRole === 'teacher') {
+        renderTeacherDashboard();
+      } else if (currentRole === 'admin') {
+        renderAdminDashboard();
+      }
+    }
+
+    // Delete booking
+    async function deleteBooking(backendId) {
+      const booking = getBookings().find(b => b.__backendId === backendId);
+      if (!booking || isLoading) return;
+      
+      isLoading = true;
+      const result = await deleteDataFromSheets(booking);
+      isLoading = false;
+
+      if (result.isOk) {
+        showToast('ลบการจองสำเร็จ!');
+      } else {
+        showToast('เกิดข้อผิดพลาดในการลบ', 'error');
+      }
+    }
+
+    // Logout
+    function logout() {
+      currentUser = null;
+      currentRole = null;
+      currentAdminTab = 'bookings';
+      renderLogin();
+      showToast('ออกจากระบบสำเร็จ!');
+    }
+
+    // Make functions globally accessible
+    window.showLoginForm = showLoginForm;
+    window.deleteBooking = deleteBooking;
+    window.logout = logout;
+    window.switchAdminTab = switchAdminTab;
+    window.showAddPeriodModal = showAddPeriodModal;
+    window.showEditPeriodModal = showEditPeriodModal;
+    window.deletePeriod = deletePeriod;
+    window.confirmDeletePeriod = confirmDeletePeriod;
+    window.showAddTeacherModal = showAddTeacherModal;
+    window.showEditTeacherModal = showEditTeacherModal;
+    window.deleteTeacher = deleteTeacher;
+    window.confirmDeleteTeacher = confirmDeleteTeacher;
+    window.closeModal = closeModal;
+    window.generateReport = generateReport;
+
+    // Element SDK config
+    async function onConfigChange(config) {
+      const systemTitleEl = document.querySelector('h1');
+      if (systemTitleEl) {
+        systemTitleEl.textContent = config.system_title || defaultConfig.system_title;
+        systemTitleEl.style.fontFamily = `${config.font_family || defaultConfig.font_family}, sans-serif`;
+      }
+
+      // Update all text elements
+      document.querySelectorAll('h1, h2, h3, p, button, label, input, select').forEach(el => {
+        el.style.fontFamily = `${config.font_family || defaultConfig.font_family}, sans-serif`;
+      });
+
+      // Update colors
+      document.querySelectorAll('[style*="background"]').forEach(el => {
+        const style = el.getAttribute('style');
+        if (style.includes('linear-gradient')) {
+          el.style.background = `linear-gradient(135deg, ${config.primary_color} 0%, ${config.action_color} 100%)`;
+        }
+      });
+    }
+
+    // Initialize Element SDK
+    if (window.elementSdk) {
+      window.elementSdk.init({
+        defaultConfig,
+        onConfigChange,
+        mapToCapabilities: (config) => ({
+          recolorables: [
+            {
+              get: () => config.primary_color || defaultConfig.primary_color,
+              set: (value) => {
+                config.primary_color = value;
+                window.elementSdk.setConfig({ primary_color: value });
+              }
+            },
+            {
+              get: () => config.secondary_color || defaultConfig.secondary_color,
+              set: (value) => {
+                config.secondary_color = value;
+                window.elementSdk.setConfig({ secondary_color: value });
+              }
+            },
+            {
+              get: () => config.text_color || defaultConfig.text_color,
+              set: (value) => {
+                config.text_color = value;
+                window.elementSdk.setConfig({ text_color: value });
+              }
+            },
+            {
+              get: () => config.action_color || defaultConfig.action_color,
+              set: (value) => {
+                config.action_color = value;
+                window.elementSdk.setConfig({ action_color: value });
+              }
+            },
+            {
+              get: () => config.accent_color || defaultConfig.accent_color,
+              set: (value) => {
+                config.accent_color = value;
+                window.elementSdk.setConfig({ accent_color: value });
+              }
+            }
+          ],
+          borderables: [],
+          fontEditable: {
+            get: () => config.font_family || defaultConfig.font_family,
+            set: (value) => {
+              config.font_family = value;
+              window.elementSdk.setConfig({ font_family: value });
+            }
+          },
+          fontSizeable: {
+            get: () => config.font_size || defaultConfig.font_size,
+            set: (value) => {
+              config.font_size = value;
+              window.elementSdk.setConfig({ font_size: value });
+            }
+          }
+        }),
+        mapToEditPanelValues: (config) => new Map([
+          ['system_title', config.system_title || defaultConfig.system_title],
+          ['login_title', config.login_title || defaultConfig.login_title],
+          ['teacher_dashboard_title', config.teacher_dashboard_title || defaultConfig.teacher_dashboard_title],
+          ['admin_dashboard_title', config.admin_dashboard_title || defaultConfig.admin_dashboard_title]
+        ])
+      });
+    }
+
+    // Initialize app
+    async function init() {
+      await initializeDataSDK();
+      renderLogin();
+    }
+
+    init();
+  </script>
+ </body>
+</html>
