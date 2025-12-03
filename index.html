@@ -525,18 +525,31 @@
       const periodData = allData.find(d => d.type === 'period' && String(d.period_id || d.id) === String(periodId));
       if (!periodData || isLoading) return;
 
+      // เพิ่มส่วนแสดงสถานะกำลังลบที่ปุ่ม
+      const confirmBtn = document.querySelector('.modal-overlay button.bg-red-500');
+      if (confirmBtn) {
+        confirmBtn.innerText = '⏳ กำลังลบ...';
+        confirmBtn.disabled = true;
+        confirmBtn.classList.add('opacity-50', 'cursor-not-allowed');
+      }
+
       isLoading = true;
-      // แน่ใจว่ามี period_id
       if(!periodData.period_id && periodData.id) periodData.period_id = periodData.id;
 
       const result = await deleteDataFromSheets(periodData);
       isLoading = false;
 
       if (result.isOk) {
-        showToast('ลบคาบเรียนสำเร็จ!');
+        showToast('✅ ลบคาบเรียนสำเร็จ!');
         closeModal();
       } else {
         showToast('เกิดข้อผิดพลาดในการลบ', 'error');
+        // คืนค่าปุ่มหากลบไม่สำเร็จ
+        if (confirmBtn) {
+          confirmBtn.innerText = 'ลบคาบ';
+          confirmBtn.disabled = false;
+          confirmBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+        }
       }
     }
 
@@ -729,15 +742,29 @@
       const teacher = getTeachers().find(t => t.__backendId === backendId);
       if (!teacher || isLoading) return;
 
+      // เพิ่มส่วนแสดงสถานะกำลังลบที่ปุ่ม
+      const confirmBtn = document.querySelector('.modal-overlay button.bg-red-500');
+      if (confirmBtn) {
+        confirmBtn.innerText = '⏳ กำลังลบ...';
+        confirmBtn.disabled = true;
+        confirmBtn.classList.add('opacity-50', 'cursor-not-allowed');
+      }
+
       isLoading = true;
       const result = await deleteDataFromSheets(teacher);
       isLoading = false;
 
       if (result.isOk) {
-        showToast('ลบครูสำเร็จ!');
+        showToast('✅ ลบครูสำเร็จ!');
         closeModal();
       } else {
-        showToast('เกิดข้อผิดพลาดในการลบ', 'error');
+        showToast('เกิดข้อผิดพลาด', 'error');
+        // คืนค่าปุ่มหากลบไม่สำเร็จ
+        if (confirmBtn) {
+          confirmBtn.innerText = 'ลบครู';
+          confirmBtn.disabled = false;
+          confirmBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+        }
       }
     }
 
@@ -1465,16 +1492,51 @@
     // Delete booking
     async function deleteBooking(backendId) {
       const booking = getBookings().find(b => b.__backendId === backendId);
-      if (!booking || isLoading) return;
-      
-      isLoading = true;
-      const result = await deleteDataFromSheets(booking);
-      isLoading = false;
+      if (!booking) return;
 
-      if (result.isOk) {
-        showToast('ลบการจองสำเร็จ!');
-      } else {
-        showToast('เกิดข้อผิดพลาดในการลบ', 'error');
+      const modal = showModal(`
+        <div class="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full mx-4 slide-in">
+          <h2 class="text-2xl font-bold mb-4 text-red-600" style="font-family: ${window.elementSdk?.config?.font_family || defaultConfig.font_family}, sans-serif;">⚠️ ยืนยันการยกเลิก</h2>
+          <p class="mb-6" style="font-family: ${window.elementSdk?.config?.font_family || defaultConfig.font_family}, sans-serif;">
+            คุณต้องการยกเลิกการจอง:<br>
+            <strong>${booking.experiment_name || 'ไม่ระบุ'}</strong><br>
+            วันที่ ${booking.date} คาบ ${booking.period}
+          </p>
+          <div class="flex gap-3">
+            <button onclick="closeModal()" class="flex-1 py-3 px-6 rounded-lg font-semibold bg-gray-300 text-gray-700 hover:bg-gray-400 transition-all" style="font-family: ${window.elementSdk?.config?.font_family || defaultConfig.font_family}, sans-serif;">
+              ปิด
+            </button>
+            <button id="confirmDeleteBookingBtn" onclick="confirmDeleteBookingAction('${backendId}')" class="flex-1 py-3 px-6 rounded-lg font-semibold bg-red-500 text-white hover:bg-red-600 transition-all" style="font-family: ${window.elementSdk?.config?.font_family || defaultConfig.font_family}, sans-serif;">
+              ยืนยันยกเลิก
+            </button>
+          </div>
+        </div>
+      `);
+    }
+
+    // ฟังก์ชันใหม่สำหรับจัดการ Action การลบการจอง
+    async function confirmDeleteBookingAction(backendId) {
+      const btn = document.getElementById('confirmDeleteBookingBtn');
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '⏳ กำลังยกเลิก...'; // แสดงข้อความรอ
+        btn.classList.add('opacity-50', 'cursor-not-allowed');
+      }
+
+      const booking = getBookings().find(b => b.__backendId === backendId);
+      if (booking) {
+        const result = await deleteDataFromSheets(booking);
+        if (result.isOk) {
+          showToast('✅ ยกเลิกการจองสำเร็จ!');
+          closeModal();
+        } else {
+          showToast('เกิดข้อผิดพลาดในการลบ', 'error');
+          if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = 'ลองใหม่';
+            btn.classList.remove('opacity-50', 'cursor-not-allowed');
+          }
+        }
       }
     }
 
