@@ -52,17 +52,21 @@ function handleJsonp(e) {
 // --- DATABASE FUNCTIONS ---
 
 function getData() {
-  // กำหนด Header ให้ชัดเจน (ต้องตรงกับที่ Frontend ส่งมา)
   var bookingSheet = getOrCreateSheet('Bookings', ['booking_id', 'teacher_name', 'date', 'period', 'lab_name', 'experiment_name', 'grade', 'room', 'created_at']);
   var teacherSheet = getOrCreateSheet('Teachers', ['teacher_id', 'teacher_name', 'teacher_username', 'teacher_password', 'created_at']);
   var periodSheet = getOrCreateSheet('Periods', ['period_id', 'period_name', 'period_time', 'created_at']);
-
-  // แปลงข้อมูลและจัดรูปแบบวันที่ให้เป็น String เสมอ (YYYY-MM-DD)
+  
+  // --- เพิ่มส่วนนี้ ---
+  var fixedSheet = getOrCreateSheet('FixedSchedule', ['id', 'day_name', 'period_name', 'description', 'created_at']); 
+  var fixedSchedules = sheetToObjects(fixedSheet, 'fixed_schedule');
+  // ----------------
+  
   var bookings = sheetToObjects(bookingSheet, 'booking').map(normalizeDate);
   var teachers = sheetToObjects(teacherSheet, 'teacher');
   var periods = sheetToObjects(periodSheet, 'period');
 
-  return { success: true, data: bookings.concat(teachers).concat(periods) };
+  // ส่งข้อมูลกลับไปรวมกัน
+  return { success: true, data: bookings.concat(teachers).concat(periods).concat(fixedSchedules) };
 }
 
 function createData(data) {
@@ -115,7 +119,10 @@ function updateData(data) {
 }
 
 function deleteDataAnywhere(id) {
-  var sheetNames = ['Bookings', 'Teachers', 'Periods'];
+  // --- จุดที่แก้ไข: เพิ่ม 'FixedSchedule' เข้าไปในรายการนี้ ---
+  var sheetNames = ['Bookings', 'Teachers', 'Periods', 'FixedSchedule']; 
+  // --------------------------------------------------------
+
   var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   var targetId = String(id);
 
@@ -128,7 +135,7 @@ function deleteDataAnywhere(id) {
     for (var i = 1; i < data.length; i++) {
       if (String(data[i][0]) === targetId) {
         sheet.deleteRow(i + 1);
-        return { success: true };
+        return { success: true }; // ลบสำเร็จ ส่งค่ากลับทันที
       }
     }
   }
@@ -144,7 +151,12 @@ function getSheetConfig(type) {
     return { name: 'Teachers', headers: ['teacher_id', 'teacher_name', 'teacher_username', 'teacher_password', 'created_at'] };
   } else if (type === 'period') {
     return { name: 'Periods', headers: ['period_id', 'period_name', 'period_time', 'created_at'] };
+  } 
+  // --- เพิ่มส่วนนี้ ---
+  else if (type === 'fixed_schedule') {
+    return { name: 'FixedSchedule', headers: ['id', 'day_name', 'period_name', 'description', 'created_at'] };
   }
+  // ----------------
   return null;
 }
 
