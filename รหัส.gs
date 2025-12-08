@@ -56,16 +56,16 @@ function getData() {
   var teacherSheet = getOrCreateSheet('Teachers', ['teacher_id', 'teacher_name', 'teacher_username', 'teacher_password', 'created_at']);
   var periodSheet = getOrCreateSheet('Periods', ['period_id', 'period_name', 'period_time', 'created_at']);
   
-  // --- เพิ่มส่วนนี้ ---
+  // --- [จุดสำคัญ] ต้องมีส่วนนี้ เพื่อดึงข้อมูลตารางประจำ ---
   var fixedSheet = getOrCreateSheet('FixedSchedule', ['id', 'day_name', 'period_name', 'description', 'created_at']); 
   var fixedSchedules = sheetToObjects(fixedSheet, 'fixed_schedule');
-  // ----------------
+  // -----------------------------------------------------
   
   var bookings = sheetToObjects(bookingSheet, 'booking').map(normalizeDate);
   var teachers = sheetToObjects(teacherSheet, 'teacher');
   var periods = sheetToObjects(periodSheet, 'period');
 
-  // ส่งข้อมูลกลับไปรวมกัน
+  // ส่งข้อมูลกลับไปรวมกัน (สังเกต .concat(fixedSchedules) ท้ายสุด)
   return { success: true, data: bookings.concat(teachers).concat(periods).concat(fixedSchedules) };
 }
 
