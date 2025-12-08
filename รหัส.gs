@@ -1,5 +1,5 @@
 // --- CONFIGURATION ---
-var SPREADSHEET_ID = '1q2O2BHO0qRMPph8R_ElOEDYPeXuUaGCVvyGYZITv2w4'; // ตรวจสอบ ID ให้ถูกต้อง
+var SPREADSHEET_ID = '1HHyL8zb-KjuWxn2EZhYdsYf8F9R4ypm2B8UpNAYJm7I'; // ตรวจสอบ ID ให้ถูกต้อง
 
 // --- MAIN DO GET ---
 function doGet(e) {
@@ -56,16 +56,16 @@ function getData() {
   var teacherSheet = getOrCreateSheet('Teachers', ['teacher_id', 'teacher_name', 'teacher_username', 'teacher_password', 'created_at']);
   var periodSheet = getOrCreateSheet('Periods', ['period_id', 'period_name', 'period_time', 'created_at']);
   
-  // --- [จุดสำคัญ] ต้องมีส่วนนี้ เพื่อดึงข้อมูลตารางประจำ ---
+  // --- เพิ่มส่วนนี้ ---
   var fixedSheet = getOrCreateSheet('FixedSchedule', ['id', 'day_name', 'period_name', 'description', 'created_at']); 
   var fixedSchedules = sheetToObjects(fixedSheet, 'fixed_schedule');
-  // -----------------------------------------------------
+  // ----------------
   
   var bookings = sheetToObjects(bookingSheet, 'booking').map(normalizeDate);
   var teachers = sheetToObjects(teacherSheet, 'teacher');
   var periods = sheetToObjects(periodSheet, 'period');
 
-  // ส่งข้อมูลกลับไปรวมกัน (สังเกต .concat(fixedSchedules) ท้ายสุด)
+  // ส่งข้อมูลกลับไปรวมกัน
   return { success: true, data: bookings.concat(teachers).concat(periods).concat(fixedSchedules) };
 }
 
