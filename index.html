@@ -822,111 +822,157 @@
     function renderLogin() {
       const config = window.elementSdk?.config || defaultConfig;
       const app = document.getElementById('app');
-      app.innerHTML = `
-        <div class="w-full min-h-screen flex items-center justify-center p-4 relative" style="background: linear-gradient(135deg, ${config.primary_color} 0%, ${config.secondary_color} 100%);">
-          <div class="w-full max-w-md bg-white rounded-2xl shadow-2xl p-8 fade-in z-10">
-            <div class="text-center mb-8">
-              <div class="w-28 h-28 mx-auto mb-4 flex items-center justify-center">
-                <img src="https://img5.pic.in.th/file/secure-sv1/fd6b0c3c8fcb90c46b0e373d31838c67.png" alt="Logo" class="w-full h-full object-contain drop-shadow-md">
-              </div>
-              <h1 class="text-3xl font-bold mb-2" style="color: ${config.text_color}; font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 1.875}px;">${config.system_title}</h1>
-              <p class="text-lg font-medium text-gray-700 mb-1" style="font-family: ${config.font_family}, sans-serif;">กลุ่มสาระการเรียนรู้วิทยาศาสตร์และเทคโนโลยี</p>
-              <p class="text-base text-gray-600 mb-6" style="font-family: ${config.font_family}, sans-serif;">โรงเรียนบางสะพานวิทยา จังหวัดประจวบคีรีขันธ์</p>
-              <p class="text-gray-400 text-sm" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">${config.login_title}</p>
-            </div>
-            <div class="space-y-4 mb-6">
-              <button onclick="showLoginForm('admin')" class="w-full py-4 px-6 rounded-xl font-semibold text-white transition-all hover:shadow-lg" style="background: ${config.action_color}; font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">🔐 เข้าสู่ระบบแอดมิน</button>
-              <button onclick="showLoginForm('teacher')" class="w-full py-4 px-6 rounded-xl font-semibold transition-all hover:shadow-lg" style="background: ${config.accent_color}; color: white; font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">👨‍🏫 เข้าสู่ระบบครูผู้สอน</button>
-            </div>
-          </div>
-          <div class="absolute bottom-6 w-full text-center">
-            <p class="text-gray-500 text-sm font-medium opacity-90" style="font-family: ${config.font_family}, sans-serif;">พัฒนาระบบโดย ครูอานนท์ เมืองแก้ว</p>
-          </div>
-        </div>
-      `;
-    }
-
-    function showLoginForm(role) {
-      const config = window.elementSdk?.config || defaultConfig;
-      const app = document.getElementById('app');
-      const isAdmin = role === 'admin';
       
-      // ดึงข้อมูลครูล่าสุดทุกครั้งที่กดเข้ามา
-      const teachers = getTeachers(); 
-
+      // เช็คว่ากดมาจากปุ่มไหน (Admin หรือ Teacher) หรือเป็นค่าเริ่มต้น
+      // แต่เดิมเราใช้พารามิเตอร์ role แต่เพื่อให้ง่าย ใช้ตัวแปร Global หรือเช็คจากการกดปุ่มเอา
+      // ในที่นี้ขอสร้างหน้าจอที่เลือก Role ได้ในตัว หรือรับค่าเข้ามา
+      
       app.innerHTML = `
         <div class="w-full min-h-screen flex items-center justify-center p-4" style="background: linear-gradient(135deg, ${config.primary_color} 0%, ${config.secondary_color} 100%);">
           <div class="w-full max-w-md bg-white rounded-2xl shadow-2xl p-8 fade-in">
-            <button onclick="renderLogin()" class="mb-4 text-gray-600 hover:text-gray-800 flex items-center" style="font-family: ${config.font_family}, sans-serif;">← กลับ</button>
+            
             <div class="text-center mb-6">
-              <h2 class="text-2xl font-bold mb-2" style="color: ${config.text_color}; font-family: ${config.font_family}, sans-serif;">${isAdmin ? 'เข้าสู่ระบบแอดมิน' : 'เข้าสู่ระบบครูผู้สอน'}</h2>
+              <h1 class="text-3xl font-bold mb-2" style="color: ${config.action_color}; font-family: ${config.font_family}, sans-serif;">${config.system_title}</h1>
+              <p class="text-gray-500">กรุณาเลือกสถานะเพื่อเข้าใช้งาน</p>
             </div>
-            <form id="loginForm" class="space-y-4">
-              ${isAdmin ? `
+
+            <div class="flex gap-2 mb-6 p-1 bg-gray-100 rounded-lg">
+                <button onclick="showLoginForm('teacher')" id="btn-role-teacher" class="flex-1 py-2 rounded-md font-semibold text-sm transition-all shadow-sm bg-white text-blue-600">ครูผู้สอน</button>
+                <button onclick="showLoginForm('admin')" id="btn-role-admin" class="flex-1 py-2 rounded-md font-semibold text-sm transition-all text-gray-500 hover:bg-gray-200">ผู้ดูแลระบบ</button>
+            </div>
+
+            <form onsubmit="handleLoginSubmit(event)">
+              <input type="hidden" id="loginRole" value="teacher"> <div class="space-y-4">
                 <div>
-                  <label class="block text-gray-700 mb-2 font-medium">ชื่อผู้ใช้</label>
-                  <input type="text" id="username" required class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2" style="border-color: ${config.action_color};">
-                </div>
-                <div>
-                  <label class="block text-gray-700 mb-2 font-medium">รหัสผ่าน</label>
-                  <input type="password" id="password" required class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2" style="border-color: ${config.action_color};">
-                </div>
-              ` : `
-                <div>
-                  <label class="block text-gray-700 mb-2 font-medium">Username (ชื่อผู้ใช้)</label>
-                  <input type="text" id="teacherUsername" required class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2" style="border-color: ${config.action_color};">
+                  <label class="block text-gray-700 mb-2 font-medium" id="labelUsername">Username (ชื่อผู้ใช้)</label>
+                  <input type="text" id="loginUsername" required class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2" style="border-color: ${config.action_color};">
                 </div>
                 <div>
                   <label class="block text-gray-700 mb-2 font-medium">Password (รหัสผ่าน)</label>
-                  <input type="password" id="teacherPassword" required class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2" style="border-color: ${config.action_color};">
+                  <input type="password" id="loginPassword" required class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2" style="border-color: ${config.action_color};">
                 </div>
-              `}
-              <button type="submit" class="w-full py-3 px-6 rounded-lg font-semibold text-white transition-all hover:shadow-lg" style="background: ${config.action_color};">เข้าสู่ระบบ</button>
+                
+                <button type="submit" id="btnLogin" class="w-full py-3 px-6 rounded-lg font-semibold text-white transition-all hover:shadow-lg transform active:scale-95" style="background: ${config.action_color};">
+                  เข้าสู่ระบบ
+                </button>
+              </div>
             </form>
+
+            <div class="mt-6 text-center text-xs text-gray-400">
+                ระบบจองห้องปฏิบัติการฟิสิกส์ 411
+            </div>
           </div>
         </div>
       `;
-
-      document.getElementById('loginForm').addEventListener('submit', (e) => {
-        e.preventDefault();
-        
-        if (isAdmin) {
-          const username = document.getElementById('username').value;
-          const password = document.getElementById('password').value;
-          
-          if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
-            currentUser = 'Admin';
-            currentRole = 'admin';
-            renderDashboard();
-            showToast('เข้าสู่ระบบสำเร็จ!');
-          } else {
-            showToast('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง', 'error');
-          }
-        } else {
-          // --- จุดที่แก้ไข: แปลงเป็น String และ Trim ช่องว่างออก ---
-          const u = document.getElementById('teacherUsername').value;
-          const p = document.getElementById('teacherPassword').value;
-          
-          console.log("กำลังตรวจสอบ:", u, p); // ดูใน Console เพื่อ Debug
-          
-          const teacher = teachers.find(t => 
-            String(t.teacher_username).trim() === String(u).trim() && 
-            String(t.teacher_password).trim() === String(p).trim()
-          );
-
-          if (teacher) {
-            currentUser = teacher.teacher_name;
-            currentRole = 'teacher';
-            renderDashboard();
-            showToast(`ยินดีต้อนรับ ${teacher.teacher_name}!`);
-          } else {
-            // ถ้า login ไม่ได้ ให้แจ้งเตือนชัดเจน
-            showToast('Username หรือ Password ไม่ถูกต้อง', 'error');
-            console.log("Teacher Data:", teachers); // ดูข้อมูลที่มีอยู่จริง
-          }
-        }
-      });
+      
+      // เรียกใช้ครั้งแรกเพื่อเซ็ตค่า UI ให้ถูกต้อง
+      showLoginForm('teacher'); 
     }
+
+    // 2. ฟังก์ชันสลับหน้าตาฟอร์ม (แค่เปลี่ยนสี/ข้อความ ไม่ได้รีโหลด)
+    function showLoginForm(role) {
+        const btnTeacher = document.getElementById('btn-role-teacher');
+        const btnAdmin = document.getElementById('btn-role-admin');
+        const labelUser = document.getElementById('labelUsername');
+        const hiddenRole = document.getElementById('loginRole');
+
+        if (!btnTeacher || !btnAdmin) return; // กัน Error
+
+        if (role === 'teacher') {
+            btnTeacher.className = "flex-1 py-2 rounded-md font-semibold text-sm transition-all shadow-sm bg-white text-blue-600";
+            btnAdmin.className = "flex-1 py-2 rounded-md font-semibold text-sm transition-all text-gray-500 hover:bg-gray-200";
+            labelUser.innerText = "Username (ชื่อผู้ใช้ของครู)";
+            hiddenRole.value = "teacher";
+        } else {
+            btnTeacher.className = "flex-1 py-2 rounded-md font-semibold text-sm transition-all text-gray-500 hover:bg-gray-200";
+            btnAdmin.className = "flex-1 py-2 rounded-md font-semibold text-sm transition-all shadow-sm bg-white text-red-600";
+            labelUser.innerText = "Admin Username";
+            hiddenRole.value = "admin";
+        }
+    }
+
+    // 3. ฟังก์ชันประมวลผลการล็อกอิน (แยกออกมาให้ชัดเจน)
+    function handleLoginSubmit(event) {
+        // ห้ามรีเฟรชหน้า
+        event.preventDefault();
+
+        const role = document.getElementById('loginRole').value;
+        const usernameInput = document.getElementById('loginUsername').value.trim(); // ตัดช่องว่างหน้าหลัง
+        const passwordInput = document.getElementById('loginPassword').value.trim();
+        const btn = document.getElementById('btnLogin');
+
+        // ทำปุ่มให้เป็นสถานะ Loading
+        const originalBtnText = btn.innerText;
+        btn.innerText = "⏳ กำลังตรวจสอบ...";
+        btn.disabled = true;
+        btn.classList.add('opacity-50');
+
+        console.log(`Attempting login as [${role}]: ${usernameInput}`);
+
+        // --- กรณีเป็น Admin ---
+        if (role === 'admin') {
+            if (usernameInput === ADMIN_USERNAME && passwordInput === ADMIN_PASSWORD) {
+                setTimeout(() => { // หน่วงเวลาเล็กน้อยให้ดูสมจริง
+                    currentUser = 'Admin';
+                    currentRole = 'admin';
+                    renderDashboard();
+                    showToast('✅ เข้าสู่ระบบผู้ดูแลระบบสำเร็จ');
+                }, 500);
+            } else {
+                showToast('❌ ชื่อผู้ใช้หรือรหัสผ่าน Admin ไม่ถูกต้อง', 'error');
+                resetButton(btn, originalBtnText);
+            }
+        } 
+        
+        // --- กรณีเป็น Teacher ---
+        else {
+            const teachers = getTeachers();
+            
+            // เช็คว่าโหลดข้อมูลครูมาหรือยัง
+            if (!teachers || teachers.length === 0) {
+                showToast('⚠️ กำลังโหลดฐานข้อมูล กรุณารอสักครู่...', 'warning');
+                // ลองโหลดใหม่
+                initializeDataSDK().then(() => {
+                    showToast('ฐานข้อมูลพร้อมแล้ว ลองกดใหม่อีกครั้ง');
+                    resetButton(btn, originalBtnText);
+                });
+                return;
+            }
+
+            // ค้นหาครู (แปลงเป็น String ทั้งหมดเพื่อกันความผิดพลาดเรื่อง type)
+            const foundTeacher = teachers.find(t => 
+                String(t.teacher_username).trim() === String(usernameInput) && 
+                String(t.teacher_password).trim() === String(passwordInput)
+            );
+
+            if (foundTeacher) {
+                 setTimeout(() => {
+                    currentUser = foundTeacher.teacher_name;
+                    currentRole = 'teacher';
+                    // บันทึก Session ไว้ในตัวแปร Global ของเรา
+                    window.currentTeacherData = foundTeacher; 
+                    
+                    renderDashboard();
+                    showToast(`✅ ยินดีต้อนรับ ${foundTeacher.teacher_name}`);
+                }, 500);
+            } else {
+                showToast('❌ ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง', 'error');
+                console.log("Failed login. Available teachers:", teachers.map(t => t.teacher_username));
+                resetButton(btn, originalBtnText);
+            }
+        }
+    }
+
+    function resetButton(btn, text) {
+        btn.innerText = text;
+        btn.disabled = false;
+        btn.classList.remove('opacity-50');
+    }
+    
+    // ทำให้ฟังก์ชันมองเห็นได้จากภายนอก (สำคัญมาก)
+    window.renderLogin = renderLogin;
+    window.showLoginForm = showLoginForm;
+    window.handleLoginSubmit = handleLoginSubmit;
 
     // Teacher Dashboard
     function renderTeacherDashboard() {
