@@ -850,44 +850,50 @@
       const config = window.elementSdk?.config || defaultConfig;
       const app = document.getElementById('app');
       const isAdmin = role === 'admin';
-      const teachers = getTeachers();
+      
+      // ดึงข้อมูลครูล่าสุดทุกครั้งที่กดเข้ามา
+      const teachers = getTeachers(); 
+
       app.innerHTML = `
         <div class="w-full min-h-screen flex items-center justify-center p-4" style="background: linear-gradient(135deg, ${config.primary_color} 0%, ${config.secondary_color} 100%);">
           <div class="w-full max-w-md bg-white rounded-2xl shadow-2xl p-8 fade-in">
-            <button onclick="renderLogin()" class="mb-4 text-gray-600 hover:text-gray-800 flex items-center" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 0.875}px;">← กลับ</button>
+            <button onclick="renderLogin()" class="mb-4 text-gray-600 hover:text-gray-800 flex items-center" style="font-family: ${config.font_family}, sans-serif;">← กลับ</button>
             <div class="text-center mb-6">
-              <h2 class="text-2xl font-bold mb-2" style="color: ${config.text_color}; font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 1.5}px;">${isAdmin ? 'เข้าสู่ระบบแอดมิน' : 'เข้าสู่ระบบครูผู้สอน'}</h2>
+              <h2 class="text-2xl font-bold mb-2" style="color: ${config.text_color}; font-family: ${config.font_family}, sans-serif;">${isAdmin ? 'เข้าสู่ระบบแอดมิน' : 'เข้าสู่ระบบครูผู้สอน'}</h2>
             </div>
             <form id="loginForm" class="space-y-4">
               ${isAdmin ? `
                 <div>
-                  <label class="block text-gray-700 mb-2 font-medium" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">ชื่อผู้ใช้</label>
-                  <input type="text" id="username" required class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px; border-color: ${config.action_color};">
+                  <label class="block text-gray-700 mb-2 font-medium">ชื่อผู้ใช้</label>
+                  <input type="text" id="username" required class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2" style="border-color: ${config.action_color};">
                 </div>
                 <div>
-                  <label class="block text-gray-700 mb-2 font-medium" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">รหัสผ่าน</label>
-                  <input type="password" id="password" required class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px; border-color: ${config.action_color};">
+                  <label class="block text-gray-700 mb-2 font-medium">รหัสผ่าน</label>
+                  <input type="password" id="password" required class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2" style="border-color: ${config.action_color};">
                 </div>
               ` : `
                 <div>
-                  <label class="block text-gray-700 mb-2 font-medium" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">Username</label>
-                  <input type="text" id="teacherUsername" required class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px; border-color: ${config.action_color};">
+                  <label class="block text-gray-700 mb-2 font-medium">Username (ชื่อผู้ใช้)</label>
+                  <input type="text" id="teacherUsername" required class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2" style="border-color: ${config.action_color};">
                 </div>
                 <div>
-                  <label class="block text-gray-700 mb-2 font-medium" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">Password</label>
-                  <input type="password" id="teacherPassword" required class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px; border-color: ${config.action_color};">
+                  <label class="block text-gray-700 mb-2 font-medium">Password (รหัสผ่าน)</label>
+                  <input type="password" id="teacherPassword" required class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2" style="border-color: ${config.action_color};">
                 </div>
               `}
-              <button type="submit" class="w-full py-3 px-6 rounded-lg font-semibold text-white transition-all hover:shadow-lg" style="background: ${config.action_color}; font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">เข้าสู่ระบบ</button>
+              <button type="submit" class="w-full py-3 px-6 rounded-lg font-semibold text-white transition-all hover:shadow-lg" style="background: ${config.action_color};">เข้าสู่ระบบ</button>
             </form>
           </div>
         </div>
       `;
+
       document.getElementById('loginForm').addEventListener('submit', (e) => {
         e.preventDefault();
+        
         if (isAdmin) {
           const username = document.getElementById('username').value;
           const password = document.getElementById('password').value;
+          
           if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
             currentUser = 'Admin';
             currentRole = 'admin';
@@ -897,19 +903,26 @@
             showToast('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง', 'error');
           }
         } else {
+          // --- จุดที่แก้ไข: แปลงเป็น String และ Trim ช่องว่างออก ---
           const u = document.getElementById('teacherUsername').value;
           const p = document.getElementById('teacherPassword').value;
+          
+          console.log("กำลังตรวจสอบ:", u, p); // ดูใน Console เพื่อ Debug
+          
           const teacher = teachers.find(t => 
             String(t.teacher_username).trim() === String(u).trim() && 
             String(t.teacher_password).trim() === String(p).trim()
           );
+
           if (teacher) {
             currentUser = teacher.teacher_name;
             currentRole = 'teacher';
             renderDashboard();
             showToast(`ยินดีต้อนรับ ${teacher.teacher_name}!`);
           } else {
+            // ถ้า login ไม่ได้ ให้แจ้งเตือนชัดเจน
             showToast('Username หรือ Password ไม่ถูกต้อง', 'error');
+            console.log("Teacher Data:", teachers); // ดูข้อมูลที่มีอยู่จริง
           }
         }
       });
@@ -1515,43 +1528,41 @@
         renderDashboard();
     }
 
-    function switchAdminTab(tab) {
-      currentAdminTab = tab;
-      renderDashboard();
+    function switchAdminTab(tabName) {
+      console.log("Switching tab to:", tabName); // เช็คว่ากดติดไหม
+      currentAdminTab = tabName;
       
-      // Setup search if on bookings tab
-      if (tab === 'bookings') {
-        setTimeout(() => {
-          const searchInput = document.getElementById('searchInput');
-          if (searchInput) {
-            searchInput.addEventListener('input', (e) => {
-              const searchTerm = e.target.value.toLowerCase();
-              const filtered = getBookings().filter(booking => 
-                booking.teacher_name.toLowerCase().includes(searchTerm) ||
-                booking.date.includes(searchTerm) ||
-                (booking.experiment_name && booking.experiment_name.toLowerCase().includes(searchTerm))
-              );
-              
-              const config = window.elementSdk?.config || defaultConfig;
-              const listEl = document.getElementById('allBookingsList');
-              listEl.innerHTML = filtered.length === 0 ? `
-                <p class="text-gray-500 text-center py-8" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">ไม่พบข้อมูล</p>
-              ` : filtered.map(booking => `
-                <div class="booking-card p-4 rounded-lg flex justify-between items-center status-booked">
-                  <div style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size}px;">
-                    <div class="font-semibold" style="color: ${config.text_color};">👨‍🏫 ${booking.teacher_name}</div>
-                    <div class="text-sm" style="color: ${config.text_color};">🔬 ${booking.experiment_name || 'ไม่ระบุ'} | 📅 ${booking.date} | ⏰ ${booking.period} | 🎓 ม.${booking.grade || '-'}/${booking.room || '-'}</div>
-                  </div>
-                  <button onclick="deleteBooking('${booking.__backendId}')" class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all" style="font-family: ${config.font_family}, sans-serif; font-size: ${config.font_size * 0.875}px;">
-                    ลบ
-                  </button>
-                </div>
-              `).join('');
-            });
-          }
-        }, 100);
+      // อัปเดต UI ปุ่มกด (Active State)
+      document.querySelectorAll('.tab-button').forEach(btn => {
+         // ลบ class active ออกจากทุกปุ่ม
+         btn.classList.remove('active');
+         btn.style.background = 'transparent';
+         btn.style.color = window.elementSdk?.config?.text_color || '#333';
+      });
+
+      // หาปุ่มที่ถูกกด แล้วใส่สี (เพื่อให้รู้ว่ากดแล้ว)
+      const activeBtn = document.querySelector(`button[onclick="switchAdminTab('${tabName}')"]`);
+      if(activeBtn) {
+         const config = window.elementSdk?.config || defaultConfig;
+         activeBtn.classList.add('active');
+         // ใส่สีพื้นหลังอ่อนๆ ให้รู้ว่าเลือกอยู่
+         activeBtn.style.backgroundColor = config.action_color + '20'; // สีจาง 20%
+         activeBtn.style.color = config.action_color;
+      }
+
+      // แสดงเนื้อหา
+      const contentDiv = document.getElementById('tabContent');
+      if (contentDiv) {
+        contentDiv.innerHTML = renderAdminTabContent();
+      } else {
+        // กรณีหา div ไม่เจอ ให้ render ใหม่ทั้งหน้า
+        renderAdminDashboard();
       }
     }
+
+    // --- สำคัญมาก! บรรทัดนี้ทำให้ปุ่ม HTML มองเห็นฟังก์ชัน ---
+    window.switchAdminTab = switchAdminTab;
+    window.showLoginForm = showLoginForm;
 
     // Render dashboard based on role
     function renderDashboard() {
